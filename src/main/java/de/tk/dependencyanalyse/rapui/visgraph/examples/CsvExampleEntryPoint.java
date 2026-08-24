@@ -160,8 +160,18 @@ public class CsvExampleEntryPoint extends AbstractEntryPoint {
                 String target = optString(data, "target", null);
                 String type = optString(data, "type", "REL");
                 if (source == null || target == null) continue;
+                // Use the actual GraphNode references (auto-created the first
+                // time we encounter an endpoint whose node we have not yet
+                // parsed) so the relationship carries live references.
+                if (!nodes.containsKey(source)) {
+                    nodes.put(source, new GraphNode(source, List.of(), Map.of()));
+                }
+                if (!nodes.containsKey(target)) {
+                    nodes.put(target, new GraphNode(target, List.of(), Map.of()));
+                }
                 Map<String, Object> props = jsonProps(data);
-                rels.add(new GraphRelationship(id, type, source, target, props));
+                rels.add(new GraphRelationship(id, type,
+                        nodes.get(source), nodes.get(target), props));
             } else {
                 // Node.
                 String id = optString(data, "id", null);
@@ -235,7 +245,11 @@ public class CsvExampleEntryPoint extends AbstractEntryPoint {
                 edgeSeq++;
                 Map<String, Object> props = new LinkedHashMap<>();
                 props.put("weight", weight);
-                rels.add(new GraphRelationship("e" + edgeSeq, "REL", src, tgt, props));
+                // Source/target now carried as live GraphNode references so
+                // downstream code can read labels / properties from the
+                // endpoint nodes directly.
+                rels.add(new GraphRelationship("e" + edgeSeq, "REL",
+                        nodes.get(src), nodes.get(tgt), props));
             }
         }
         return new GraphData(new ArrayList<>(nodes.values()), rels);

@@ -6,8 +6,14 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Generic graph relationship. Source/target are node IDs (not Node objects),
- * to keep the model decoupled from any particular node instance.
+ * Generic graph relationship. Source and target are direct references to
+ * the connected {@link GraphNode}s, so a relationship is always
+ * consistent with its endpoint graph without further lookup.
+ *
+ * <p>For convenience and to keep the existing serialization code
+ * working, the relationship exposes both {@link #getSource()} / {@link #getTarget()}
+ * (typed {@link GraphNode}) and {@link #getSourceId()} / {@link #getTargetId()}
+ * (string id), with the string accessors simply delegating to the node's id.</p>
  *
  * <p>Relationships can carry an optional {@code weight} attribute, stored
  * both as a typed primitive field and inside the {@code properties} map.
@@ -24,28 +30,71 @@ public final class GraphRelationship {
 
     private final String id;
     private final String type;
-    private final String sourceId;
-    private final String targetId;
+    private final GraphNode sourceNode;
+    private final GraphNode targetNode;
     private final Map<String, Object> properties;
     private final Map<String, Object> visualAttrs = new LinkedHashMap<>();
     private String customTooltip;
     private boolean tooltipOverride = false;
 
-    public GraphRelationship(String id, String type, String sourceId, String targetId,
-                             Map<String, Object> properties) {
+    /**
+     * Primary constructor — source and target are full node references.
+     * String ids are derived from the nodes so callers downstream do not
+     * need to keep their own mapping in sync.
+     */
+    public GraphRelationship(String id, String type,
+                              GraphNode sourceNode, GraphNode targetNode,
+                              Map<String, Object> properties) {
         this.id = Objects.requireNonNull(id, "id");
         this.type = Objects.requireNonNull(type, "type");
-        this.sourceId = Objects.requireNonNull(sourceId, "sourceId");
-        this.targetId = Objects.requireNonNull(targetId, "targetId");
+        this.sourceNode = Objects.requireNonNull(sourceNode, "sourceNode");
+        this.targetNode = Objects.requireNonNull(targetNode, "targetNode");
         this.properties = properties == null
                 ? new LinkedHashMap<>()
                 : new LinkedHashMap<>(properties);
     }
 
+    /**
+     * Legacy constructor kept for backward-compatibility with code that
+     * built relationships from raw ids (CSV parser, etc.). Internally it
+     * now uses lightweight {@code id}-only {@link GraphNode} adapters so
+     * the resulting relationship still exposes a populated
+     * {@link #getSource()} / {@link #getTarget()}.
+     *
+     * @deprecated Use {@link #GraphRelationship(String, String, GraphNode, GraphNode, Map)}
+     *             — constructing with bare strings loses the connection
+     *             back to the originating nodes.
+     */
+    @Deprecated
+    public GraphRelationship(String id, String type,
+                              String sourceId, String targetId,
+                              Map<String, Object> properties) {
+        this(id, type,
+                new GraphNode(sourceId, java.util.List.of(),
+                        java.util.Map.of("name", sourceId)),
+                new GraphNode(targetId, java.util.List.of(),
+                        java.util.Map.of("name", targetId)),
+                properties);
+    }
+
     public String getId() { return id; }
     public String getType() { return type; }
-    public String getSourceId() { return sourceId; }
-    public String getTargetId() { return targetId; }
+
+    /** Source endpoint of this relationship. Never {@code null}. */
+    public GraphNode getSource() { return sourceNode; }
+    /** Target endpoint of this relationship. Never {@code null}. */
+    public GraphNode getTarget() { return targetNode; }
+
+    /**
+     * Convenience accessor that returns the source endpoint's id.
+     * Delegates to {@link GraphNode#getId()} so callers that only have a
+     * string-id-based pipeline keep working.
+     */
+    public String getSourceId() { return sourceNode.getId(); }
+
+    /** Convenience accessor for the target endpoint's id. */
+    public String getTargetId() { return targetNode.getId(); }
+
     public Map<String, Object> getProperties() { return Collections.unmodifiableMap(properties); }
 
     /**
@@ -165,8 +214,8 @@ public final class GraphRelationship {
     public Map<String, Object> toVisNetworkData() {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("id", id);
-        out.put("from", sourceId);
-        out.put("to", targetId);
+        out.put("from", sourceNode.getId());
+        out.put("to", targetNode.getId());
         if (visualAttrs.containsKey("label")) {
             out.put("label", visualAttrs.get("label"));
         }
@@ -199,8 +248,8 @@ public final class GraphRelationship {
     public Map<String, Object> toNvlData() {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("id", id);
-        out.put("from", sourceId);
-        out.put("to", targetId);
+        out.put("from", sourceNode.getId());
+        out.put("to", targetNode.getId());
         out.put("type", type);
         // Coerce non-string property values to strings so NVL's color
         // parser doesn't crash on Number/Boolean values when it scans
@@ -248,8 +297,8 @@ public final class GraphRelationship {
     public Map<String, Object> toCytoscapeEdge() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("id", id);
-        data.put("source", sourceId);
-        data.put("target", targetId);
+        data.put("source", sourceNode.getId());
+        data.put("target", targetNode.getId());
         data.put("type", type);
         if (visualAttrs.containsKey("label")) {
             Object lbl = visualAttrs.get("label");
@@ -275,7 +324,7 @@ public final class GraphRelationship {
         // The header "<from> -> <to>" is exposed separately as
         // `data.tooltipHeader` so the JS side can render it as a bold
         // title above the property table.
-        String header = sourceId + " -> " + targetId;
+        String header = sourceNode.getId() + " -> " + targetNode.getId();
         String baseTooltip = tooltipOverride
                 ? customTooltip
                 : TooltipBuilder.fromProperties(id, properties);

@@ -133,7 +133,7 @@ public class SampleGraphController {
                     // surface a pre-computed log10Weight next to it.
                     props.put(GraphRelationship.PROP_WEIGHT, weight);
                 }
-                rels.add(new GraphRelationship(relId, "REL", s.getId(), t.getId(), props));
+                rels.add(new GraphRelationship(relId, "REL", s, t, props));
             }
         }
         return new GraphData(new ArrayList<>(nodeIndex.values()), rels);

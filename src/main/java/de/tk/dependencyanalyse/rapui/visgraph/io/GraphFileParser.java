@@ -108,7 +108,7 @@ public final class GraphFileParser {
                 if (parts.length >= 4) {
                     props.put("label", parts[3].trim());
                 }
-                rels.add(new GraphRelationship("e" + edgeSeq, "REL", s.getId(), t.getId(), props));
+                rels.add(new GraphRelationship("e" + edgeSeq, "REL", s, t, props));
             }
         }
         return new GraphData(new ArrayList<>(nodes.values()), rels);
@@ -219,7 +219,11 @@ public final class GraphFileParser {
             // string "1" would yield null downstream.
             coerceWeight(extraProps);
             edgeSeq++;
-            rels.add(new GraphRelationship("e" + edgeSeq, "REL", source, target, extraProps));
+            // Pass actual GraphNode references so the relationship carries
+            // direct pointers to its endpoints (downstream code can call
+            // getSource().getLabels() etc. without lookups).
+            rels.add(new GraphRelationship("e" + edgeSeq, "REL",
+                    nodes.get(source), nodes.get(target), extraProps));
         }
         return edgeSeq;
     }
