@@ -1,0 +1,107 @@
+/* vis-graph-viewer bridge styles */
+
+html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    font-family: sans-serif;
+    font-size: 13px;
+    background: transparent;
+}
+
+#network {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 100%;
+}
+
+/* vis-network 9.x renders the title inside a div.vis-tooltip element
+   that has white-space: nowrap. We override that to allow our table to
+   wrap, and we style the table rendered by our TooltipBuilder. */
+.vis-tooltip {
+    white-space: normal !important;
+    max-width: 400px;
+    font-family: sans-serif;
+    font-size: 12px;
+    background: #fffff0 !important;
+    border: 1px solid #c0c0c0;
+    color: #000;
+}
+.vis-tooltip table.vgv-tooltip {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 12px;
+}
+.vis-tooltip table.vgv-tooltip thead th {
+    background: #e8e8e8;
+    text-align: center;
+    padding: 4px 6px;
+    border-bottom: 1px solid #c0c0c0;
+    color: #000;
+}
+.vis-tooltip table.vgv-tooltip tbody th {
+    text-align: right;
+    padding: 2px 6px 2px 4px;
+    color: #555;
+    font-weight: normal;
+}
+.vis-tooltip table.vgv-tooltip tbody td {
+    text-align: left;
+    padding: 2px 4px;
+    color: #000;
+}
+.vis-tooltip table.vgv-tooltip tbody tr:nth-child(even) th,
+.vis-tooltip table.vgv-tooltip tbody tr:nth-child(even) td {
+    background: #f8f8f8;
+}
+
+#vgv-context-menu {
+    position: fixed;
+    display: none;
+    background: #ffffff;
+    border: 1px solid #c0c0c0;
+    box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.18);
+    z-index: 1000;
+    min-width: 180px;
+    padding: 4px 0;
+    border-radius: 2px;
+}
+
+.vgv-menu-entry {
+    padding: 6px 14px;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.vgv-menu-entry:hover {
+    background: #e8f0fe;
+}
+
+.vgv-menu-entry.vgv-menu-disabled {
+    color: #999;
+    cursor: default;
+}
+
+.vgv-menu-entry.vgv-menu-disabled:hover {
+    background: transparent;
+}
+
+.vgv-menu-separator {
+    height: 1px;
+    background: #e0e0e0;
+    margin: 4px 0;
+}
+
+.vgv-menu-submenu-label::after {
+    content: "\25B8";
+    float: right;
+    margin-left: 12px;
+    color: #888;
+}

@@ -1,0 +1,1011 @@
+﻿Source,Target,Weight
+Kassenwechselmeldungen,Kassenwechsel-Leistungsdaten,149
+Kur,Kassenwechsel-Leistungsdaten,304
+Zahnersatz,Kassenwechsel-Leistungsdaten,113
+Leistungen-Basis,Kassenwechsel-Leistungsdaten,162
+Kinderkrankengeld (KKG),Kassenwechsel-Leistungsdaten,196
+Pflegeunterstuetzungsgeld,Kassenwechsel-Leistungsdaten,25
+Arbeitsunfaehigkeit,Kassenwechsel-Leistungsdaten,227
+Sonstige Leistungen,Kassenwechsel-Leistungsdaten,127
+Krankenhausaufenthalt,Kassenwechsel-Leistungsdaten,224
+Haeusliche Krankenpflege,Kassenwechsel-Leistungsdaten,190
+Pflegeversicherung,Kassenwechsel-Leistungsdaten,121
+Haertefall - Belastungsgrenze,Kassenwechsel-Leistungsdaten,294
+Versichertenbestandsfuehrung,Beitragserstattung aus Rente,3
+Dokumentenarchiv und Dokumentenaufnahme,Entsendung,1
+Einstufungsverlauf,Studienverlauf,29
+CRM,Studienverlauf,16
+Arbeitgeberbestandsfuehrung,Studienverlauf,4
+tk.de,Studienverlauf,31
+Versichertenbestandsfuehrung,Studienverlauf,61
+SozV-Meldungen,Studienverlauf,1
+CRM-Akquisemanager,Studienverlauf,27
+Optimization,Studienverlauf,3
+MeineTK,Studienverlauf,470
+Digitale Gesundheitsanwendung,Konfigurierbare Leistung,1141
+Leistungsuebersicht,Konfigurierbare Leistung,4
+Ambulante Versorgungsabrechnungen,Konfigurierbare Leistung,9
+Wahltarife,Dividendenverlauf,8
+Kiss24-TKeasy,MeineTK,16
+DA Ambulante spezialfachaerztliche Versorgung,MeineTK,3
+Vorgangssystem,MeineTK,3
+Pflegeversicherung,MeineTK,3
+Datenaustausch-Basis,MeineTK,3
+DA Hausarztzentrierte Versorgung,MeineTK,1
+DA Zahnaerzte / Behandlungsfallnachweis,MeineTK,2
+Digital Service Solutions (DSS),MeineTK,74
+Einstufungsverlauf,MeineTK,134
+Praevention,MeineTK,41
+DA Entgeltersatzleistungen,MeineTK,5
+Krankenhausaufenthalt,MeineTK,34
+CRM-Akquisemanager,MeineTK,2
+Optimization,MeineTK,2
+Unfall,MeineTK,15
+Elektronischer Austausch von Sozialversicherungsdaten (EESSI),MeineTK,2
+tk.de,MeineTK,18
+Behandler-Verzeichnis,MeineTK,87
+CRM,MeineTK,60
+DA Ärzte / Einzelfallnachweis,MeineTK,3
+Entgeltersatzleistungen,MeineTK,3
+TK-Konto (TKeasy-GUI  Schriftgut),MeineTK,1
+Versichertenbestandsfuehrung,MeineTK,165
+Haertefall - Belastungsgrenze,MeineTK,50
+Sonstige Leistungen,MeineTK,1
+Mutterschaftsgeld (MUG),MeineTK,109
+Kinderkrankengeld (KKG),MeineTK,19
+Zahnersatz,MeineTK,47
+CRM-Bonusprogramm,MeineTK,4
+Gesundheitskarte (eGK),MeineTK,5
+Mitgliederbeitrag,MeineTK,3
+Arbeitsunfaehigkeit,MeineTK,2
+TK-Vorsorgeplaner,MeineTK,2
+Entsendung,MeineTK,1
+LM-Fallfuehrung,MeineTK,23
+TK-Patientenquittung,MeineTK,14
+DA Apotheken,MeineTK,3
+Studienverlauf,MeineTK,14
+Leistungsuebersicht,Psychotherapie,5
+Krankenhausaufenthalt,Psychotherapie,13
+Digitale Gesundheitsanwendung,Psychotherapie,2
+DA Ärzte / Einzelfallnachweis,Psychotherapie,22
+Kur,Psychotherapie,38
+CRM,TI-Messenger-Adapter,6
+CRM,Seminarverwaltung,4
+Arbeitgeberbestandsfuehrung,Seminarverwaltung,12
+tk.de,Seminarverwaltung,52
+DA Ärzte / Einzelfallnachweis,Sozialhilfetraeger,31
+DA Apotheken,Sozialhilfetraeger,46
+Dokumentenarchiv und Dokumentenaufnahme,Sozialhilfetraeger,9
+Pruefung der Leistungspflicht - PLP,Sozialhilfetraeger,21
+DA Integrierte Versorgung,Sozialhilfetraeger,22
+Gesundheitskarte (eGK),Sozialhilfetraeger,2
+Pflegeversicherung,Sozialhilfetraeger,26
+DA Zahnaerzte / Behandlungsfallnachweis,Sozialhilfetraeger,83
+Sonstige Leistungen,Sozialhilfetraeger,33
+Haertefall - Belastungsgrenze,Sozialhilfetraeger,66
+Versichertenbestandsfuehrung,Sozialhilfetraeger,125
+"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Sozialhilfetraeger,2
+Krankenhausaufenthalt,Sozialhilfetraeger,99
+Mitteilungsmanagement,Sozialhilfetraeger,2
+DA Sonstige Leistungserbringer,Sozialhilfetraeger,30
+DA Ambulante spezialfachaerztliche Versorgung,Sozialhilfetraeger,30
+Einstufungsverlauf,Kur,7
+Kiss24-TKeasy,Kur,10
+Leistungsuebersicht,Kur,14
+Haeusliche Krankenpflege,Kur,34
+Arbeitsunfaehigkeit,Kur,275
+Rehasport und Funktionstraining,Kur,19
+Hilfsmittel,Kur,58
+Leistungen-Basis,Kur,80
+DA Sonstige Leistungserbringer,Kur,16
+Krankenhausaufenthalt,Kur,85
+Pruefung der Leistungspflicht - PLP,Kur,75
+Widerspruchsbearbeitung,Kur,23
+MeineTK,Kur,15
+Wahltarife,Kur,119
+DA Mitteilungsverfahren RV,Kur,59
+Einzug von Zuzahlungen,Kur,53
+Kostenerstattung,Kur,2
+Unfall,Kur,19
+Kieferorthopaedie,Kur,5
+Fahrkosten,Kur,55
+Entgeltersatzleistungen,Kur,59
+Zahnersatz,Kur,53
+"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Kur,2
+Haertefall - Belastungsgrenze,Kur,6
+Professionelle Zahnreinigung,Kur,1
+DA Entgeltersatzleistungen,Kur,81
+Dokumentenarchiv und Dokumentenaufnahme,Kur,6
+Mitteilungsmanagement,Kur,4
+CRM,Kur,15
+Widerspruchsbearbeitung,Elektronischer Rechtsverkehr,60
+Versichertenbestandsfuehrung,Elektronischer Rechtsverkehr,1
+Pruefung der Leistungspflicht - PLP,Elektronischer Rechtsverkehr,12
+Gerichtsverzeichnis,Elektronischer Rechtsverkehr,6
+Geschaeftspartner,Elektronischer Rechtsverkehr,26
+Einzug von Zuzahlungen,Elektronischer Rechtsverkehr,11
+Kiss24-TKeasy,Elektronischer Rechtsverkehr,1
+Unfall,Elektronischer Rechtsverkehr,5
+Arbeitgeberbeitrag,Elektronischer Rechtsverkehr,16
+KVNr-Meldungen,Kassenwechselmeldungen,32
+CRM,Kassenwechselmeldungen,39
+SozV-Meldungen,Kassenwechselmeldungen,5
+DA Entgeltersatzleistungen,Kassenwechselmeldungen,55
+Pflegeversicherung,Kassenwechselmeldungen,3
+Durchgangsarztberichte,Leistungssystem,3
+Haeusliche Krankenpflege,Leistungssystem,2
+Medizinproduktregress,Leistungssystem,4
+Leistungsuebersicht,Leistungssystem,2
+Unfall,Leistungssystem,4
+Kur,DA Mitteilungsverfahren RV,563
+Arbeitsunfaehigkeit,DA Mitteilungsverfahren RV,971
+DA Integrierte Versorgung,Versorgungsangebot,1145
+Diseasemanagement-Programme,Versorgungsangebot,4
+Sonstige Leistungen,Versorgungsangebot,6
+Wahltarife,Versorgungsangebot,15
+MeineTK,Versorgungsangebot,22
+DA Hausarztzentrierte Versorgung,Versorgungsangebot,2
+LM-Fallfuehrung,Versorgungsangebot,33
+Hausarztzentrierte Versorgung (HzV),Versorgungsangebot,141
+Leistungen-Basis,Versorgungsangebot,3
+Behandler-Verzeichnis,Versorgungsangebot,2
+DA Ambulante spezialfachaerztliche Versorgung,Versorgungsangebot,2
+Krankenhausaufenthalt,Versorgungsangebot,24
+Psychotherapie,Versorgungsangebot,30
+DA Ärzte / Einzelfallnachweis,Versorgungsangebot,174
+tk.de,Versorgungsangebot,28
+Hilfsmittel,Versorgungsangebot,1
+Abrechnungsmanagement Sonstige Leistungserbringer,Einzug von Zuzahlungen,48
+Kur,Einzug von Zuzahlungen,203
+Widerspruchsbearbeitung,Einzug von Zuzahlungen,13
+DA Sonstige Leistungserbringer,Einzug von Zuzahlungen,28
+Ambulante Versorgungsabrechnungen,Einzug von Zuzahlungen,360
+Haertefall - Belastungsgrenze,Einzug von Zuzahlungen,11
+Krankenhausaufenthalt,Einzug von Zuzahlungen,91
+Rehasport und Funktionstraining,Versorgungsamtsbescheid,1
+Krankenhausaufenthalt,Versorgungsamtsbescheid,23
+Einzug von Zuzahlungen,Versorgungsamtsbescheid,3
+Kostenerstattung,Versorgungsamtsbescheid,8
+Kur,Versorgungsamtsbescheid,95
+Leistungsuebersicht,Versorgungsamtsbescheid,15
+Fahrkosten,Versorgungsamtsbescheid,88
+Chronikerdaten,Versorgungsamtsbescheid,75
+Pflegeversicherung,Versorgungsamtsbescheid,21
+Leistungen-Basis,Versorgungsamtsbescheid,93
+Datenaustausch-Basis,DA Ärzte / Einzelfallnachweis,2
+TK-Patientenquittung,DA Ärzte / Einzelfallnachweis,30
+DA Hausarztzentrierte Versorgung,DA Ärzte / Einzelfallnachweis,8
+Listanforderungen (SAF),DA Ärzte / Einzelfallnachweis,7
+Leistungsaushilfe Ausland,DA Ärzte / Einzelfallnachweis,8
+Elektronischer Austausch von Sozialversicherungsdaten (EESSI),DA Ärzte / Einzelfallnachweis,30
+DA Zahnaerzte / Behandlungsfallnachweis,DA Ärzte / Einzelfallnachweis,27
+DA Apotheken,DA Ärzte / Einzelfallnachweis,23
+DA Sonstige Leistungserbringer,DA Ärzte / Einzelfallnachweis,9
+Digitale Gesundheitsanwendung,DA Ärzte / Einzelfallnachweis,2
+TK-Vorsorgeplaner,DA Ärzte / Einzelfallnachweis,83
+Pruefung der Leistungspflicht - PLP,DA Ärzte / Einzelfallnachweis,12
+MeineTK,Gesundheitsdividende,6
+CRM-Bonusprogramm,Gesundheitsdividende,49
+Sonstige Leistungen,Gesundheitsdividende,22
+Professionelle Zahnreinigung,Gesundheitsdividende,11
+Wahltarife,Gesundheitsdividende,16
+MeineTK,Digital Service Solutions (DSS),6
+CRM,Digital Service Solutions (DSS),14
+Mitteilungsmanagement,Hilfsmittel,7
+Haeusliche Krankenpflege,Hilfsmittel,27
+DA Sonstige Leistungserbringer,Hilfsmittel,47
+Leistungsuebersicht,Hilfsmittel,39
+CRM,Hilfsmittel,12
+"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Hilfsmittel,57
+MeineTK,Hilfsmittel,34
+Leistungen-Basis,Hilfsmittel,14
+KI-Basis,Hilfsmittel,9
+Kur,Hilfsmittel,39
+Unfall,Hilfsmittel,18
+Pflegeversicherung,Hilfsmittel,54
+tk.de,Hilfsmittel,66
+DA Zahnaerzte / Behandlungsfallnachweis,Pruefung der Leistungspflicht - PLP,61
+Mutterschaftsgeld (MUG),Pruefung der Leistungspflicht - PLP,18
+RSA-Clearing,Pruefung der Leistungspflicht - PLP,8
+Krankenhausaufenthalt,Pruefung der Leistungspflicht - PLP,98
+DA Ambulante spezialfachaerztliche Versorgung,Pruefung der Leistungspflicht - PLP,64
+DA Sonstige Leistungserbringer,Pruefung der Leistungspflicht - PLP,29
+Kur,Pruefung der Leistungspflicht - PLP,114
+DA Apotheken,Pruefung der Leistungspflicht - PLP,44
+Sonstige Leistungsrueckforderungen,Kinderkrankengeld (KKG),51
+Rehasport und Funktionstraining,Kinderkrankengeld (KKG),4
+DA Entgeltersatzleistungen,Kinderkrankengeld (KKG),69
+Leistungen-Basis,Kinderkrankengeld (KKG),39
+MeineTK,Kinderkrankengeld (KKG),165
+Unfall,Kinderkrankengeld (KKG),53
+Leistungsuebersicht,Kinderkrankengeld (KKG),13
+TK-Konto (TKeasy-GUI  Schriftgut),Mitgliederbeitrag,263
+tk.de,Mitgliederbeitrag,59
+Wahltarife,Mitgliederbeitrag,7
+MeineTK,Mitgliederbeitrag,82
+SozV-Meldungen,Mitgliederbeitrag,1
+Versichertenbestandsfuehrung,Mitgliederbeitrag,14
+Kur,Gutachter-Verzeichnis,1
+Mitteilungsmanagement,Gutachter-Verzeichnis,13
+Psychotherapie,Gutachter-Verzeichnis,338
+Sonstige Leistungen,Gutachter-Verzeichnis,107
+Behandler-Verzeichnis,Gutachter-Verzeichnis,55
+Kiss24-TKeasy,Gutachter-Verzeichnis,9
+"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Gutachter-Verzeichnis,0
+Zahnersatz,Gutachter-Verzeichnis,277
+Kieferorthopaedie,Gutachter-Verzeichnis,123
+Leistungen-Basis,Gutachter-Verzeichnis,104
+DA Sonstige Leistungserbringer,Rehasport und Funktionstraining,41
+Kur,Rehasport und Funktionstraining,89
+Leistungen-Basis,Rehasport und Funktionstraining,1
+Leistungsuebersicht,Rehasport und Funktionstraining,2
+MeineTK,DA Apotheken,9
+Elektronischer Austausch von Sozialversicherungsdaten (EESSI),DA Apotheken,65
+Ambulante Versorgungsabrechnungen,DA Apotheken,4
+Wahltarife,DA Apotheken,9
+Psychotherapie,DA Apotheken,8
+Sonstige Leistungen,DA Apotheken,23
+DA Ärzte / Einzelfallnachweis,DA Apotheken,43
+Krankenhausaufenthalt,DA Apotheken,4
+Hilfsmittel,DA Apotheken,28
+Kostenerstattung,DA Apotheken,10
+TK-Patientenquittung,DA Apotheken,2
+Pruefung der Leistungspflicht - PLP,DA Apotheken,37
+Sozialhilfetraeger,DA Apotheken,7
+Haertefall - Belastungsgrenze,DA Apotheken,189
+Leistungen-Basis,DA Apotheken,6
+Ambulante Versorgungsabrechnungen,Digitale Gesundheitsanwendung,56
+MeineTK,Digitale Gesundheitsanwendung,54
+Versichertenbestandsfuehrung,Krankenkassen-Verzeichnis,415
+Pflegeversicherung,Krankenkassen-Verzeichnis,15
+DA Entgeltersatzleistungen,Krankenkassen-Verzeichnis,11
+Zusatztarif / Zusatzversicherung,Krankenkassen-Verzeichnis,5
+Pflegeunterstuetzungsgeld,Krankenkassen-Verzeichnis,19
+Arbeitgeberbestandsfuehrung,Krankenkassen-Verzeichnis,21
+Kur,Krankenkassen-Verzeichnis,34
+Unfall,Krankenkassen-Verzeichnis,2
+CRM-Akquisemanager,Krankenkassen-Verzeichnis,121
+UI-Components,Krankenkassen-Verzeichnis,21
+Integrationstests,Krankenkassen-Verzeichnis,19
+RSA-Clearing,Krankenkassen-Verzeichnis,150
+Einstufungsverlauf,Krankenkassen-Verzeichnis,5
+Wahltarife,Krankenkassen-Verzeichnis,4
+KVNr-Meldungen,Krankenkassen-Verzeichnis,24
+MeineTK,Krankenkassen-Verzeichnis,36
+Versorgungsbezug-Meldungen,Krankenkassen-Verzeichnis,3
+CRM,Krankenkassen-Verzeichnis,353
+Vertriebsmanagement,Krankenkassen-Verzeichnis,246
+tk.de,Krankenkassen-Verzeichnis,43
+Pruefung der Leistungspflicht - PLP,Krankenkassen-Verzeichnis,154
+Rente,Krankenkassen-Verzeichnis,85
+Meldungen-Basis,Krankenkassen-Verzeichnis,259
+FV-Meldungen,Krankenkassen-Verzeichnis,73
+Studienverlauf,Krankenkassen-Verzeichnis,11
+Haeusliche Krankenpflege,Krankenkassen-Verzeichnis,0
+Mitgliederbeitrag,Krankenkassen-Verzeichnis,0
+LM-Fallfuehrung,Mitteilungsmanagement,13
+Fahrkosten,Mitteilungsmanagement,8
+Zahnersatz,Mitteilungsmanagement,1
+Pflegeunterstuetzungsgeld,Mitteilungsmanagement,1
+Pflegeversicherung,Mitteilungsmanagement,1
+Krankenhausaufenthalt,Mitteilungsmanagement,2
+Leistungen-Basis,Mitteilungsmanagement,10
+Kieferorthopaedie,Mitteilungsmanagement,1
+Unfall,Mitteilungsmanagement,1
+Arbeitsunfaehigkeit,Mitteilungsmanagement,35
+Haeusliche Krankenpflege,Mitteilungsmanagement,98
+Sonstige Leistungen,Mitteilungsmanagement,33
+Psychotherapie,Mitteilungsmanagement,20
+Hilfsmittel,Mitteilungsmanagement,25
+Haushaltshilfe,Mitteilungsmanagement,9
+Rehasport und Funktionstraining,Mitteilungsmanagement,1
+Kur,Mitteilungsmanagement,33
+Kur,Vorgangstracking,208
+Zahnersatz,Vorgangstracking,148
+Professionelle Zahnreinigung,Vorgangstracking,95
+Prozess-Beispiel,Vorgangstracking,19
+Fahrkosten,Vorgangstracking,36
+Haertefall - Belastungsgrenze,Vorgangstracking,61
+Kinderkrankengeld (KKG),Vorgangstracking,34
+MeineTK,Vorgangstracking,287
+Geschaeftsprozess,Vorgangstracking,34
+Mutterschaftsgeld (MUG),Vorgangstracking,19
+Pflegeversicherung,Vorgangstracking,19
+"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Vorgangstracking,15
+CRM,Vorgangstracking,8
+Optimization,Zusatztarif / Zusatzversicherung,1
+Pflegeversicherung,Zusatztarif / Zusatzversicherung,3
+Wahltarife,Zusatztarif / Zusatzversicherung,19
+MeineTK,Zusatztarif / Zusatzversicherung,17
+MeineTK,Arbeitsunfaehigkeit,155
+ICD-Verzeichnis,Arbeitsunfaehigkeit,24
+Unfall,Arbeitsunfaehigkeit,211
+Leistungsuebersicht,Arbeitsunfaehigkeit,106
+Hilfsmittel,Arbeitsunfaehigkeit,22
+KI-Basis,Arbeitsunfaehigkeit,64
+DA Entgeltersatzleistungen,Arbeitsunfaehigkeit,117
+Krankenhausaufenthalt,Arbeitsunfaehigkeit,21
+Leistungen-Basis,Arbeitsunfaehigkeit,170
+Kur,Arbeitsunfaehigkeit,3
+Erstattung von AG-Aufwendungen,Arbeitsunfaehigkeit,18
+DA Mitteilungsverfahren RV,Arbeitsunfaehigkeit,3
+Arbeitsunfaehigkeit-Steuerung,Arbeitsunfaehigkeit,83
+Entgeltersatzleistungen,Arbeitsunfaehigkeit,3831
+LM-Fallfuehrung,Arbeitsunfaehigkeit,16
+Mitteilungsmanagement,Arbeitsunfaehigkeit,22
+Rehasport und Funktionstraining,Arbeitsunfaehigkeit,2
+CRM,Arbeitsunfaehigkeit,2
+DA Ärzte / Einzelfallnachweis,DA Ambulante spezialfachaerztliche Versorgung,1
+TK-Patientenquittung,DA Ambulante spezialfachaerztliche Versorgung,36
+Krankenhausaufenthalt,DA Ambulante spezialfachaerztliche Versorgung,156
+Pruefung der Leistungspflicht - PLP,DA Ambulante spezialfachaerztliche Versorgung,27
+Versichertenbestandsfuehrung,Steuerdaten,16
+CRM-Bonusprogramm,Steuerdaten,5
+DA Beitragsdifferenzierung PV,Steuerdaten,70
+Leistungen-Basis,Steuerdaten,193
+Dokumentenarchiv und Dokumentenaufnahme,Steuerdaten,6
+Arbeitgeberbeitrag,Steuerdaten,11
+TK-Konto (TKeasy-GUI  Schriftgut),Steuerdaten,3
+MeineTK,Steuerdaten,72
+Leistungsuebersicht,Haeusliche Krankenpflege,5
+Mitteilungsmanagement,Haeusliche Krankenpflege,9
+Pflegeversicherung,Haeusliche Krankenpflege,98
+Einzug von Zuzahlungen,Haeusliche Krankenpflege,10
+Abrechnungsmanagement Sonstige Leistungserbringer,Haeusliche Krankenpflege,12
+KI-Basis,Haeusliche Krankenpflege,13
+Leistungen-Basis,Haeusliche Krankenpflege,7
+DA Sonstige Leistungserbringer,Haeusliche Krankenpflege,11
+DA Apotheken,TK-Patientenquittung,207
+DA Zahnaerzte / Behandlungsfallnachweis,TK-Patientenquittung,178
+DA Ärzte / Einzelfallnachweis,TK-Patientenquittung,132
+DA Ambulante spezialfachaerztliche Versorgung,TK-Patientenquittung,100
+MeineTK,TK-Patientenquittung,290
+DA Hausarztzentrierte Versorgung,TK-Patientenquittung,112
+SozV-Meldungen,KVNr-Meldungen,8
+Kassenwechselmeldungen,KVNr-Meldungen,4
+Pflegeversicherung,Rente,39
+SozV-Meldungen,Rente,6
+Einstufungsverlauf,Rente,38
+DA Entgeltersatzleistungen,Rente,11
+Leistungen-Basis,Rente,4
+TK-Konto (TKeasy-GUI  Schriftgut),Rente,4
+Arbeitsunfaehigkeit,Rente,172
+Wahltarife,Rente,1
+Haertefall - Belastungsgrenze,Rente,35
+Beitragserstattung aus Rente,Rente,2
+Mitteilungsmanagement,Rente,1
+Entgeltersatzleistungen,Rente,394
+Kur,Rente,114
+Kassenwechselmeldungen,Rente,3
+Pflegeperson,Rente,11
+MeineTK,Rente,8
+Versichertenbestandsfuehrung,Rente,240
+Neuaufnahmemanager,Rente,6
+Kiss24-TKeasy,Rente,3
+Arbeitgeberbeitrag,Rente,2
+DA Sonstige Leistungserbringer,Krankenhausaufenthalt,74
+Ambulante Versorgungsabrechnungen,Krankenhausaufenthalt,6
+Leistungsuebersicht,Krankenhausaufenthalt,65
+CRM,Krankenhausaufenthalt,20
+Haeusliche Krankenpflege,Krankenhausaufenthalt,13
+Mitteilungsmanagement,Krankenhausaufenthalt,3
+Widerspruchsbearbeitung,Krankenhausaufenthalt,2
+Pflegeversicherung,Krankenhausaufenthalt,54
+DA Apotheken,Krankenhausaufenthalt,37
+Unfall,Krankenhausaufenthalt,158
+Kinderkrankengeld (KKG),Krankenhausaufenthalt,8
+Leistungen-Basis,Krankenhausaufenthalt,61
+Integrationstests,Krankenhausaufenthalt,50
+KI-Basis,Krankenhausaufenthalt,85
+Fahrkosten,Krankenhausaufenthalt,25
+Kostenerstattung,Krankenhausaufenthalt,3
+Fusionsarchiv-Krankenhaus,Krankenhausaufenthalt,25
+LM-Fallfuehrung,Krankenhausaufenthalt,1010
+DA Entgeltersatzleistungen,Krankenhausaufenthalt,209
+Rehasport und Funktionstraining,Krankenhausaufenthalt,4
+MeineTK,Krankenhausaufenthalt,131
+Pruefung der Leistungspflicht - PLP,Krankenhausaufenthalt,183
+Hilfsmittel,Krankenhausaufenthalt,34
+DA Ärzte / Einzelfallnachweis,Krankenhausaufenthalt,126
+Arbeitsunfaehigkeit,Krankenhausaufenthalt,280
+Verzeichnis Krankenhaeuser,Krankenhausaufenthalt,25
+Sozialhilfetraeger,Krankenhausaufenthalt,18
+DA Ambulante spezialfachaerztliche Versorgung,Krankenhausaufenthalt,38
+Einzug von Zuzahlungen,Krankenhausaufenthalt,107
+Digitale Gesundheitsanwendung,Krankenhausaufenthalt,2
+Leistungsaushilfe Ausland,Durchgangsarztberichte,9
+Unfall,Durchgangsarztberichte,393
+Integrationstests,LM-Fallfuehrung,5
+MeineTK,LM-Fallfuehrung,3
+Widerspruchsbearbeitung,LM-Fallfuehrung,22
+Krankenhausaufenthalt,LM-Fallfuehrung,42
+Sonstige Leistungen,LM-Fallfuehrung,2
+Leistungsuebersicht,LM-Fallfuehrung,82
+Vertriebsmanagement,LM-Fallfuehrung,1
+Leistungen-Basis,LM-Fallfuehrung,7
+Sozialhilfetraeger,Hilfsmittelverzeichnis,24
+Leistungsuebersicht,Hilfsmittelverzeichnis,18
+tk.de,Hilfsmittelverzeichnis,3
+Pflegeversicherung,Hilfsmittelverzeichnis,179
+Kur,Hilfsmittelverzeichnis,20
+DA Apotheken,Hilfsmittelverzeichnis,43
+Hilfsmittel,Hilfsmittelverzeichnis,1935
+CRM,Vertriebsmanagement,122
+Verzeichnis Krankenhaeuser,Vertriebsmanagement,1
+Neuaufnahmemanager,Vertriebsmanagement,62
+Vorgangssystem,Vertriebsmanagement,22
+Optimization,Vertriebsmanagement,2
+Kiss24-TKeasy,Vertriebsmanagement,11
+CRM-Akquisemanager,Vertriebsmanagement,300
+Versichertenbestandsfuehrung,Vertriebsmanagement,69
+Studienverlauf,Vertriebsmanagement,3
+Arbeitgeberbeitrag,Vertriebsmanagement,1
+Integrationstests,Vertriebsmanagement,20
+tk.de,Vertriebsmanagement,73
+Sonstige Leistungen,Vertriebsmanagement,2
+Dokumentenarchiv und Dokumentenaufnahme,Vertriebsmanagement,11
+Gesundheitsprojekte,Vertriebsmanagement,16
+Kostenerstattung,Vertriebsmanagement,2
+Arbeitgeberbestandsfuehrung,Vertriebsmanagement,545
+MeineTK,Professionelle Zahnreinigung,32
+Kostenerstattung,Professionelle Zahnreinigung,4
+Leistungsuebersicht,Professionelle Zahnreinigung,1
+Leistungsuebersicht,Chronikerdaten,9
+Haertefall - Belastungsgrenze,Chronikerdaten,354
+KI-Basis,Chronikerdaten,6
+Haushaltshilfe,Zahnersatz,1
+MeineTK,Zahnersatz,323
+Leistungsuebersicht,Zahnersatz,27
+KI-Basis,Zahnersatz,53
+Kieferorthopaedie,Zahnersatz,42
+Mitteilungsmanagement,Zahnersatz,7
+DA Zahnaerzte / Behandlungsfallnachweis,Zahnersatz,296
+Leistungen-Basis,Zahnersatz,10
+Wahltarife,Zahnersatz,15
+Kieferorthopaedie,MDK-Verzeichnis,47
+Mitteilungsmanagement,MDK-Verzeichnis,261
+Kur,MDK-Verzeichnis,240
+Arbeitsunfaehigkeit,MDK-Verzeichnis,370
+Versichertenbestandsfuehrung,MDK-Verzeichnis,6
+LM-Fallfuehrung,MDK-Verzeichnis,82
+Krankenhausaufenthalt,MDK-Verzeichnis,225
+Psychotherapie,MDK-Verzeichnis,194
+Gebietsabgrenzung (GBA),MDK-Verzeichnis,20
+Widerspruchsbearbeitung,MDK-Verzeichnis,9
+Rehasport und Funktionstraining,MDK-Verzeichnis,13
+Leistungen-Basis,MDK-Verzeichnis,70
+Kiss24-TKeasy,MDK-Verzeichnis,5
+Hilfsmittel,MDK-Verzeichnis,216
+Fahrkosten,MDK-Verzeichnis,11
+Pflegeversicherung,MDK-Verzeichnis,83
+Haushaltshilfe,MDK-Verzeichnis,23
+Sonstige Leistungen,MDK-Verzeichnis,29
+Haeusliche Krankenpflege,MDK-Verzeichnis,238
+DA Zahnaerzte / Behandlungsfallnachweis,Gesundheitskarte (eGK),19
+DA Entgeltersatzleistungen,Gesundheitskarte (eGK),2
+Wahl der Kostenerstattung,Gesundheitskarte (eGK),3
+Sozialhilfetraeger,Gesundheitskarte (eGK),5
+Versorgungsangebot,Gesundheitskarte (eGK),47
+Rente,Gesundheitskarte (eGK),1
+Ambulante Versorgungsabrechnungen,Gesundheitskarte (eGK),13
+CRM,Gesundheitskarte (eGK),4
+Versichertenbestandsfuehrung,Gesundheitskarte (eGK),10
+Versorgungsamtsbescheid,Gesundheitskarte (eGK),1
+Diseasemanagement-Programme,Gesundheitskarte (eGK),69
+Hausarztzentrierte Versorgung (HzV),Gesundheitskarte (eGK),21
+tk.de,Gesundheitskarte (eGK),15
+Leistungsaushilfe Ausland,Gesundheitskarte (eGK),7
+Haeusliche Krankenpflege,Gesundheitskarte (eGK),1
+Optimization,Gesundheitskarte (eGK),4
+Neuaufnahmemanager,Gesundheitskarte (eGK),2
+Krankenhausaufenthalt,Gesundheitskarte (eGK),18
+KVNr-Meldungen,Gesundheitskarte (eGK),39
+Elektronischer Austausch von Sozialversicherungsdaten (EESSI),Gesundheitskarte (eGK),31
+LM-Fallfuehrung,Gesundheitskarte (eGK),5
+MeineTK,Gesundheitskarte (eGK),217
+DA Ärzte / Einzelfallnachweis,Gesundheitskarte (eGK),15
+Haertefall - Belastungsgrenze,Gesundheitskarte (eGK),9
+Leistungen-Basis,Gesundheitskarte (eGK),13
+Fusionsarchiv,Fusionsarchiv-Krankenhaus,129
+Fusionsarchiv Leistung,Fusionsarchiv-Krankenhaus,1
+Geschaeftspartner,Listanforderungen (SAF),134
+CRM,Listanforderungen (SAF),3
+Arbeitgeberbeitrag,Listanforderungen (SAF),107
+Verzeichnis Krankenhaeuser,Listanforderungen (SAF),35
+Pflegeversicherung,Listanforderungen (SAF),3
+Erstattung von AG-Aufwendungen,Entgeltersatzleistungen,2
+Wahltarife,Entgeltersatzleistungen,63
+Leistungsuebersicht,Entgeltersatzleistungen,4
+Unfall,Entgeltersatzleistungen,26
+MeineTK,Entgeltersatzleistungen,177
+Arbeitsunfaehigkeit,Entgeltersatzleistungen,448
+Kinderkrankengeld (KKG),Entgeltersatzleistungen,122
+Leistungen-Basis,Entgeltersatzleistungen,120
+DA Entgeltersatzleistungen,Entgeltersatzleistungen,159
+Pflegeunterstuetzungsgeld,Entgeltersatzleistungen,17
+Fusionsarchiv-Krankenhaus,Fusionsarchiv Leistung,4
+Leistungsuebersicht,Fusionsarchiv Leistung,32
+Praevention,Praeventionskurse,224
+MeineTK,Praeventionskurse,27
+Leistungsuebersicht,Praeventionskurse,0
+UI-Components,Praeventionskurse,74
+tk.de,Praeventionskurse,82
+Sonstige Leistungen,Wahltarife,15
+Kinderkrankengeld (KKG),Wahltarife,57
+Pflegeversicherung,Wahltarife,2
+Kostenerstattung,Wahltarife,44
+Entgeltersatzleistungen,Wahltarife,186
+CRM,Wahltarife,27
+Leistungen-Basis,Wahltarife,15
+Arbeitsunfaehigkeit,Wahltarife,141
+MeineTK,Wahltarife,56
+Optimization,Wahltarife,1
+Sozialhilfetraeger,Wahltarife,13
+Versichertenbestandsfuehrung,Wahltarife,3
+Unfall,Abrechnungsmanagement Sonstige Leistungserbringer,31
+Haertefall - Belastungsgrenze,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),10
+Sonstige Leistungen,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),35
+Krankenhausaufenthalt,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),194
+DA Apotheken,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),26
+"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Elektronischer Austausch von Sozialversicherungsdaten (EESSI),2
+Entsendung,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),368
+DA Integrierte Versorgung,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),26
+Kur,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),38
+Hilfsmittel,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),8
+Pflegeversicherung,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),4
+Haeusliche Krankenpflege,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),15
+Psychotherapie,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),11
+DA Ärzte / Einzelfallnachweis,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),46
+DA Hausarztzentrierte Versorgung,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),29
+Ambulante Versorgungsabrechnungen,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),9
+Praevention,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),10
+DA Sonstige Leistungserbringer,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),41
+Kostenerstattung,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),18
+Haushaltshilfe,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),8
+DA Zahnaerzte / Behandlungsfallnachweis,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),246
+Durchgangsarztberichte,Unfall,82
+Fahrkosten,Unfall,4
+Leistungsuebersicht,Unfall,7
+DA Ärzte / Einzelfallnachweis,Unfall,65
+Sonstige Leistungen,Unfall,12
+Geschaeftspartner,Unfall,49
+Haushaltshilfe,Unfall,5
+Rehasport und Funktionstraining,Unfall,1
+KI-Basis,Unfall,32
+Pflegeversicherung,Unfall,8
+Medizinproduktregress,Unfall,96
+Zahnersatz,Unfall,5
+Mitteilungsmanagement,Unfall,5
+Dokumentenarchiv und Dokumentenaufnahme,Unfall,2
+Hilfsmittel,Unfall,5
+Einzug von Zuzahlungen,Unfall,15
+Kieferorthopaedie,Unfall,8
+Pflegeunterstuetzungsgeld,Unfall,1
+Erstattung von AG-Aufwendungen,Unfall,1
+Psychotherapie,Unfall,6
+Kinderkrankengeld (KKG),Unfall,57
+Kur,Unfall,17
+Leistungsaushilfe Ausland,Unfall,1
+Krankenhausaufenthalt,Unfall,39
+MeineTK,Unfall,68
+DA Apotheken,Unfall,47
+"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Unfall,2
+CRM,Unfall,5
+Leistungen-Basis,Unfall,39
+DA Sonstige Leistungserbringer,Unfall,48
+Kiss24-TKeasy,Unfall,3
+Arbeitgeberbestandsfuehrung,Unfall,75
+Entgeltersatzleistungen,Unfall,57
+Haeusliche Krankenpflege,Unfall,14
+Arbeitsunfaehigkeit,Unfall,23
+Diseasemanagement-Programme,Ext-Tools,1
+Mutterschaftsgeld (MUG),SozV-Meldungen,101
+Entsendung,SozV-Meldungen,1
+Versichertenbestandsfuehrung,SozV-Meldungen,20
+Kinderkrankengeld (KKG),SozV-Meldungen,9
+Rente,SozV-Meldungen,3
+KVNr-Meldungen,SozV-Meldungen,80
+MeineTK,SozV-Meldungen,16
+Elektronischer Rechtsverkehr,SozV-Meldungen,1
+Steuerdaten,SozV-Meldungen,1
+Leistungen-Basis,SozV-Meldungen,3
+Pflegeversicherung,SozV-Meldungen,233
+Arbeitgeberbeitrag,SozV-Meldungen,12
+Arbeitsunfaehigkeit,SozV-Meldungen,174
+Wahltarife,SozV-Meldungen,150
+Insolvenzmanagement,SozV-Meldungen,47
+Optimization,SozV-Meldungen,1
+BBG-Meldungen,SozV-Meldungen,1584
+Unfall,SozV-Meldungen,136
+Vertriebsmanagement,SozV-Meldungen,150
+Entgeltersatzleistungen,SozV-Meldungen,109
+Kur,SozV-Meldungen,112
+Einstufungsverlauf,SozV-Meldungen,5
+Neuaufnahmemanager,SozV-Meldungen,41
+Haertefall - Belastungsgrenze,SozV-Meldungen,2
+Pflegeunterstuetzungsgeld,SozV-Meldungen,9
+Kassenwechselmeldungen,SozV-Meldungen,38
+Hausarztzentrierte Versorgung (HzV),SozV-Meldungen,4
+Arbeitgeberbestandsfuehrung,SozV-Meldungen,36
+Integrationstests,SozV-Meldungen,7
+Pruefung der Leistungspflicht - PLP,FV-Meldungen,35
+DA Entgeltersatzleistungen,FV-Meldungen,57
+Vorgangssystem,Widerspruchsbearbeitung,3
+Kiss24-TKeasy,Widerspruchsbearbeitung,2
+KI-Basis,Widerspruchsbearbeitung,16
+Krankenhausaufenthalt,Widerspruchsbearbeitung,36
+Elektronischer Rechtsverkehr,Widerspruchsbearbeitung,28
+Arbeitgeberbeitrag,Widerspruchsbearbeitung,17
+Versichertenbestandsfuehrung,Widerspruchsbearbeitung,2
+LM-Fallfuehrung,Widerspruchsbearbeitung,12
+CRM,Widerspruchsbearbeitung,17
+Versichertenbestandsfuehrung,Versorgungsbezug-Meldungen,25
+Mitgliederbeitrag,Versorgungsbezug-Meldungen,9
+Haertefall - Belastungsgrenze,Versorgungsbezug-Meldungen,13
+Abrechnungsmanagement Sonstige Leistungserbringer,Haushaltshilfe,785
+Leistungen-Basis,Haushaltshilfe,4
+DA Sonstige Leistungserbringer,Haushaltshilfe,15
+Arbeitgeberbestandsfuehrung,Erstattung von AG-Aufwendungen,6
+Mutterschaftsgeld (MUG),Erstattung von AG-Aufwendungen,2
+Unfall,Erstattung von AG-Aufwendungen,278
+Versichertenbestandsfuehrung,Fusionsarchiv,8
+Erstattung von AG-Aufwendungen,Fusionsarchiv,40
+Fusionsarchiv Leistung,Fusionsarchiv,359
+Leistungsuebersicht,Fusionsarchiv,14
+Arbeitgeberbeitrag,Fusionsarchiv,204
+CRM,Fusionsarchiv,9
+Diseasemanagement-Programme,Fusionsarchiv,19
+Fusionsarchiv-Krankenhaus,Fusionsarchiv,167
+SozV-Meldungen,Fusionsarchiv,26
+Digitale Gesundheitsanwendung,Ambulante Versorgungsabrechnungen,3
+MeineTK,Pflegeperson,55
+Pflegeversicherung,Pflegeperson,871
+Kieferorthopaedie,DA Zahnaerzte / Behandlungsfallnachweis,3
+TK-Vorsorgeplaner,DA Zahnaerzte / Behandlungsfallnachweis,108
+Pruefung der Leistungspflicht - PLP,DA Zahnaerzte / Behandlungsfallnachweis,126
+Elektronischer Austausch von Sozialversicherungsdaten (EESSI),DA Zahnaerzte / Behandlungsfallnachweis,48
+Zahnersatz,DA Zahnaerzte / Behandlungsfallnachweis,163
+CRM,DA Zahnaerzte / Behandlungsfallnachweis,2
+Sozialhilfetraeger,DA Zahnaerzte / Behandlungsfallnachweis,34
+Kostenerstattung,DA Zahnaerzte / Behandlungsfallnachweis,29
+TK-Patientenquittung,DA Zahnaerzte / Behandlungsfallnachweis,12
+Wahltarife,DA Zahnaerzte / Behandlungsfallnachweis,99
+MeineTK,Arbeitsunfaehigkeit-Steuerung,11
+Entgeltersatzleistungen,Arbeitsunfaehigkeit-Steuerung,91
+Vorpruefsoftware,Krebsregister,33
+MeineTK,Praevention,50
+Gesundheitsprojekte,Praevention,2
+Leistungsuebersicht,Praevention,9
+Rehasport und Funktionstraining,Pflegeversicherung,10
+Widerspruchsbearbeitung,Pflegeversicherung,29
+Fahrkosten,Pflegeversicherung,132
+MeineTK,Pflegeversicherung,991
+Versichertenbestandsfuehrung,Pflegeversicherung,1
+"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Pflegeversicherung,2
+Fusionsarchiv,Pflegeversicherung,15
+KI-Basis,Pflegeversicherung,11
+Kiss24-TKeasy,Pflegeversicherung,9
+Leistungen-Basis,Pflegeversicherung,14
+DA Zahnaerzte / Behandlungsfallnachweis,Pflegeversicherung,8
+DA Sonstige Leistungserbringer,Pflegeversicherung,21
+Haushaltshilfe,Pflegeversicherung,11
+Unfall,Pflegeversicherung,30
+tk.de,Pflegeversicherung,110
+Hilfsmittel,Pflegeversicherung,62
+Kur,Pflegeversicherung,7
+Pflegeperson,Pflegeversicherung,58
+Chronikerdaten,Pflegeversicherung,16
+Pflegeunterstuetzungsgeld,Pflegeversicherung,9
+Wahltarife,DA Sonstige Leistungserbringer,184
+Pruefung der Leistungspflicht - PLP,DA Sonstige Leistungserbringer,13
+Sozialhilfetraeger,DA Sonstige Leistungserbringer,72
+Haeusliche Krankenpflege,Haertefall - Belastungsgrenze,33
+MeineTK,Haertefall - Belastungsgrenze,169
+Krankenhausaufenthalt,Haertefall - Belastungsgrenze,7
+Kostenerstattung,Haertefall - Belastungsgrenze,11
+Sonstige Leistungen,Haertefall - Belastungsgrenze,17
+Ambulante Versorgungsabrechnungen,Haertefall - Belastungsgrenze,1
+Hilfsmittel,Haertefall - Belastungsgrenze,10
+Leistungsuebersicht,Haertefall - Belastungsgrenze,2
+Fahrkosten,Haertefall - Belastungsgrenze,4
+DA Sonstige Leistungserbringer,Haertefall - Belastungsgrenze,53
+Leistungen-Basis,Haertefall - Belastungsgrenze,72
+Kur,Haertefall - Belastungsgrenze,22
+Haushaltshilfe,Haertefall - Belastungsgrenze,12
+DA Apotheken,Haertefall - Belastungsgrenze,2
+Chronikerdaten,Haertefall - Belastungsgrenze,18
+Einzug von Zuzahlungen,Haertefall - Belastungsgrenze,154
+Praevention,Haertefall - Belastungsgrenze,1
+Abrechnungsmanagement Sonstige Leistungserbringer,Haertefall - Belastungsgrenze,12
+Leistungen-Basis,Kieferorthopaedie,5
+Mitteilungsmanagement,Kieferorthopaedie,12
+DA Zahnaerzte / Behandlungsfallnachweis,Kieferorthopaedie,132
+DA Zahnaerzte Leistungsantraege (ELAG),Kieferorthopaedie,60
+Leistungsuebersicht,Kieferorthopaedie,8
+KI-Basis,Kieferorthopaedie,5
+Haushaltshilfe,Leistung-Services,5
+Dokumentenarchiv und Dokumentenaufnahme,Registratur,10
+Arbeitgeberbeitrag,Registratur,21
+Widerspruchsbearbeitung,Registratur,109
+Hilfsmittel,Heilmittelverzeichnis,8
+Kur,Heilmittelverzeichnis,54
+Kostenerstattung,Heilmittelverzeichnis,360
+DA Beitragsdifferenzierung PV,Datenschutzcockpit,84
+"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Gesundheitsprojekte,5
+Vertriebsmanagement,Gesundheitsprojekte,154
+Dokumentenarchiv und Dokumentenaufnahme,Gesundheitsprojekte,6
+UI-Components,Gesundheitsprojekte,41
+Mutterschaftsgeld (MUG),Datenuebermittlung BA - DÜBAK,62
+DA Entgeltersatzleistungen,Datenuebermittlung BA - DÜBAK,11
+Entgeltersatzleistungen,Datenuebermittlung BA - DÜBAK,220
+Erstattung von AG-Aufwendungen,Arbeitgeberbeitrag,258
+Arbeitgeberbestandsfuehrung,Arbeitgeberbeitrag,155
+Einstufungsverlauf,Arbeitgeberbeitrag,8
+Krankenhausaufenthalt,Arbeitgeberbeitrag,0
+Vertriebsmanagement,Arbeitgeberbeitrag,12
+Fusionsarchiv,Arbeitgeberbeitrag,37
+Insolvenzmanagement,Arbeitgeberbeitrag,2390
+TK-Konto (TKeasy-GUI  Schriftgut),Arbeitgeberbeitrag,75
+"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Arbeitgeberbeitrag,33
+Integrationstests,Arbeitgeberbeitrag,24
+Mutterschaftsgeld (MUG),Arbeitgeberbeitrag,1
+Arbeitgeberbeitrag,Insolvenzmanagement,64
+SozV-Meldungen,Insolvenzmanagement,3
+Kiss24-TKeasy,Insolvenzmanagement,7
+Erstattung von AG-Aufwendungen,Insolvenzmanagement,9
+Vertriebsmanagement,Insolvenzmanagement,1
+Arbeitgeberbestandsfuehrung,Insolvenzmanagement,14
+Mutterschaftsgeld (MUG),Insolvenzmanagement,1
+Leistungen-Basis,Mutterschaftsgeld (MUG),30
+DA Entgeltersatzleistungen,Mutterschaftsgeld (MUG),32
+Leistungsuebersicht,Mutterschaftsgeld (MUG),10
+TK-Vorsorgeplaner,Kommunikation im Medizinwesen Log,47
+DA Zahnaerzte Leistungsantraege (ELAG),Kommunikation im Medizinwesen Log,538
+Kur,Kommunikation im Medizinwesen Log,963
+LM-Fallfuehrung,Kommunikation im Medizinwesen Log,105
+Abrechnungsmanagement Sonstige Leistungserbringer,Kommunikation im Medizinwesen Log,224
+Pflegeversicherung,Kommunikation im Medizinwesen Log,430
+DA Apotheken,Kommunikation im Medizinwesen Log,74
+e-Nachricht,Kommunikation im Medizinwesen Log,536
+DA Entgeltersatzleistungen,Kommunikation im Medizinwesen Log,997
+Digital Service Solutions (DSS),Kommunikation im Medizinwesen Log,3
+Gesundheitskarte (eGK),Kommunikation im Medizinwesen Log,338
+Zahnersatz,Kommunikation im Medizinwesen Log,4
+Hausarztzentrierte Versorgung (HzV),Kommunikation im Medizinwesen Log,9
+Insolvenzmanagement,Vollstreckung,31
+Pruefung der Leistungspflicht - PLP,Vollstreckung,42
+Einzug von Zuzahlungen,Vollstreckung,35
+Mitgliederbeitrag,Vollstreckung,47
+Arbeitgeberbeitrag,Vollstreckung,1055
+Versichertenbestandsfuehrung,Vollstreckung,20
+Vertriebsmanagement,Vollstreckung,2
+TK-Konto (TKeasy-GUI  Schriftgut),Vollstreckung,921
+"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Vollstreckung,433
+Kiss24-TKeasy,Vollstreckung,5
+Gebietsabgrenzung (GBA),Vollstreckung,15
+MeineTK,TK-Vorsorgeplaner,14
+CRM,Neuaufnahmemanager,63
+CRM-Akquisemanager,Neuaufnahmemanager,529
+Vertriebsmanagement,Neuaufnahmemanager,1202
+Versichertenbestandsfuehrung,Neuaufnahmemanager,352
+Vorgangssystem,Neuaufnahmemanager,12
+Studienverlauf,Neuaufnahmemanager,10
+MeineTK,CRM-Bonusprogramm,428
+CRM,CRM-Bonusprogramm,9
+KI-Basis,CRM-Bonusprogramm,4
+Sonstige Leistungen,CRM-Bonusprogramm,1
+Professionelle Zahnreinigung,CRM-Bonusprogramm,6
+MeineTK,Fahrkosten,212
+Leistungsuebersicht,Fahrkosten,6
+DA Sonstige Leistungserbringer,Fahrkosten,32
+Leistungen-Basis,Fahrkosten,1
+Haertefall - Belastungsgrenze,Fahrkosten,9
+Leistungsuebersicht,Leistungsaushilfe Ausland,13
+Krankenhausaufenthalt,Leistungsaushilfe Ausland,51
+Ambulante Versorgungsabrechnungen,Leistungsaushilfe Ausland,5
+Pruefung der Leistungspflicht - PLP,Leistungsaushilfe Ausland,8
+Elektronischer Austausch von Sozialversicherungsdaten (EESSI),Leistungsaushilfe Ausland,311
+Dokumentenarchiv und Dokumentenaufnahme,Leistungsaushilfe Ausland,4
+Kiss24-TKeasy,Leistungsaushilfe Ausland,3
+DA Zahnaerzte / Behandlungsfallnachweis,Leistungsaushilfe Ausland,33
+Krebsregister,Leistungsaushilfe Ausland,28
+DA Zahnaerzte / Behandlungsfallnachweis,Kostenerstattung,180
+Sozialhilfetraeger,Kostenerstattung,10
+Unfall,Kostenerstattung,21
+Kieferorthopaedie,Kostenerstattung,74
+tk.de,Kostenerstattung,9
+Pruefung der Leistungspflicht - PLP,Kostenerstattung,12
+Leistungen-Basis,Kostenerstattung,13
+MeineTK,Kostenerstattung,21
+Sonstige Leistungen,Kostenerstattung,21
+Leistungsuebersicht,Kostenerstattung,27
+Optimization,Hausarztzentrierte Versorgung (HzV),2
+Leistungsaushilfe Ausland,Hausarztzentrierte Versorgung (HzV),3
+KI-Basis,Hausarztzentrierte Versorgung (HzV),2
+TK-Vorsorgeplaner,Hausarztzentrierte Versorgung (HzV),85
+Versorgungsangebot,Hausarztzentrierte Versorgung (HzV),31
+DA Hausarztzentrierte Versorgung,Hausarztzentrierte Versorgung (HzV),830
+Pflegeversicherung,Hausarztzentrierte Versorgung (HzV),1
+DA Apotheken,Hausarztzentrierte Versorgung (HzV),2
+Wahltarife,Hausarztzentrierte Versorgung (HzV),38
+MeineTK,Hausarztzentrierte Versorgung (HzV),40
+DA Ärzte / Einzelfallnachweis,Arztgebuehrenordnungsposition,151
+Pruefung der Leistungspflicht - PLP,Arztgebuehrenordnungsposition,73
+TK-Patientenquittung,Arztgebuehrenordnungsposition,68
+TK-Vorsorgeplaner,Arztgebuehrenordnungsposition,3
+Sozialhilfetraeger,Arztgebuehrenordnungsposition,132
+DA Hausarztzentrierte Versorgung,Arztgebuehrenordnungsposition,47
+Wahltarife,Arztgebuehrenordnungsposition,29
+Digitale Gesundheitsanwendung,eVerordnung Manager,21
+Hilfsmittel,ICD-Verzeichnis,12
+Unfall,ICD-Verzeichnis,14
+Kur,ICD-Verzeichnis,41
+Kostenerstattung,ICD-Verzeichnis,6
+Arbeitsunfaehigkeit,ICD-Verzeichnis,3
+Versorgungsangebot,ICD-Verzeichnis,5
+Digitale Gesundheitsanwendung,ICD-Verzeichnis,2
+CRM,E-Mail Marketing System,373
+Kiss24-TKeasy,Sonstige Leistungen,9
+Mutterschaftsgeld (MUG),Sonstige Leistungen,3
+Pruefung der Leistungspflicht - PLP,Sonstige Leistungen,70
+Versichertenbestandsfuehrung,Sonstige Leistungen,2
+Generische Kostenerstattung,Sonstige Leistungen,42
+"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Sonstige Leistungen,7
+LM-Fallfuehrung,Sonstige Leistungen,18
+Kinderkrankengeld (KKG),Sonstige Leistungen,31
+Leistungsuebersicht,Sonstige Leistungen,190
+Krankenhausaufenthalt,Sonstige Leistungen,3
+Elektronischer Austausch von Sozialversicherungsdaten (EESSI),Sonstige Leistungen,4
+Ambulante Versorgungsabrechnungen,Sonstige Leistungen,138
+CRM,Sonstige Leistungen,1
+Pflegeunterstuetzungsgeld,Sonstige Leistungen,2
+Entgeltersatzleistungen,Sonstige Leistungen,14
+Einzug von Zuzahlungen,Sonstige Leistungen,2
+DA Zahnaerzte Leistungsantraege (ELAG),Sonstige Leistungen,19
+Psychotherapie,Sonstige Leistungen,16
+DA Apotheken,Sonstige Leistungen,6
+Kur,Sonstige Leistungen,38
+Haeusliche Krankenpflege,Sonstige Leistungen,1
+Mitteilungsmanagement,Sonstige Leistungen,3
+Hausarztzentrierte Versorgung (HzV),Sonstige Leistungen,1
+DA Zahnaerzte / Behandlungsfallnachweis,Sonstige Leistungen,107
+Pflegeversicherung,Sonstige Leistungen,36
+Gesundheitsdividende,Sonstige Leistungen,8
+MeineTK,Sonstige Leistungen,112
+DA Sonstige Leistungserbringer,Sonstige Leistungen,30
+Rehasport und Funktionstraining,Sonstige Leistungen,1
+Leistungen-Basis,Sonstige Leistungen,128
+Wahl der Kostenerstattung,Sonstige Leistungen,7
+Fahrkosten,Sonstige Leistungen,65
+Unfall,Sonstige Leistungen,3
+Pflegeversicherung,KISG-Java (Altsysteme),7
+Gesundheitskarte (eGK),KISG-Java (Altsysteme),49
+Leistungen-Basis,KISG-Java (Altsysteme),45
+Arbeitgeberbestandsfuehrung,KISG-Java (Altsysteme),4
+Dokumentenarchiv und Dokumentenaufnahme,KISG-Java (Altsysteme),19
+Vorgangssystem,KISG-Java (Altsysteme),22
+DA Integrierte Versorgung,KISG-Java (Altsysteme),18
+Kiss24-TKeasy,KISG-Java (Altsysteme),303
+CRM,KISG-Java (Altsysteme),6
+Krankenhausaufenthalt,KISG-Java (Altsysteme),41
+Versichertenbestandsfuehrung,tk.de,362
+Vertriebsmanagement,tk.de,24
+MeineTK,tk.de,121
+TK-Termin,tk.de,4
+CRM-Akquisemanager,tk.de,8
+Krankenhausaufenthalt,Implantattraeger,2
+Leistungsuebersicht,Pflegeunterstuetzungsgeld,26
+DA Entgeltersatzleistungen,Pflegeunterstuetzungsgeld,25
+Leistungen-Basis,Pflegeunterstuetzungsgeld,14
+Gesundheitskarte (eGK),Melderegisterabgleich,141
+Versichertenbestandsfuehrung,Melderegisterabgleich,267
+Hausarztzentrierte Versorgung (HzV),DA Hausarztzentrierte Versorgung,9
+MeineTK,DA Hausarztzentrierte Versorgung,213
+TK-Patientenquittung,DA Hausarztzentrierte Versorgung,30
+TK-Vorsorgeplaner,DA Hausarztzentrierte Versorgung,1477
+Krankenhausaufenthalt,KI-Basis,222
+Kieferorthopaedie,KI-Basis,73
+Einstufungsverlauf,KI-Basis,36
+Arbeitsunfaehigkeit,KI-Basis,264
+Haeusliche Krankenpflege,KI-Basis,214
+Datenuebermittlung BA - DÜBAK,TK-Konto (TKeasy-GUI  Schriftgut),15
+MeineTK,TK-Konto (TKeasy-GUI  Schriftgut),13
+Versichertenbestandsfuehrung,TK-Konto (TKeasy-GUI  Schriftgut),31
+Dividendenverlauf,TK-Konto (TKeasy-GUI  Schriftgut),73
+Wahltarife,TK-Konto (TKeasy-GUI  Schriftgut),131
+Professionelle Zahnreinigung,TK-Konto (TKeasy-GUI  Schriftgut),1
+Mitgliederbeitrag,TK-Konto (TKeasy-GUI  Schriftgut),930
+Kostenerstattung,TK-Konto (TKeasy-GUI  Schriftgut),6
+Arbeitgeberbeitrag,TK-Konto (TKeasy-GUI  Schriftgut),22
+Beitragserstattung aus Rente,TK-Konto (TKeasy-GUI  Schriftgut),17
+Studienverlauf,TK-Konto (TKeasy-GUI  Schriftgut),68
+Kiss24-TKeasy,Testdatenmanagement,23
+Unfall,Medizinproduktregress,55
+KI-Basis,Diseasemanagement-Programme,1
+Hausarztzentrierte Versorgung (HzV),Diseasemanagement-Programme,95
+Versorgungsangebot,Diseasemanagement-Programme,47
+Versichertenbestandsfuehrung,Diseasemanagement-Programme,1
+LM-Fallfuehrung,Diseasemanagement-Programme,48
+CRM,Diseasemanagement-Programme,7
+Fusionsarchiv,Diseasemanagement-Programme,10
+Wahltarife,Diseasemanagement-Programme,8
+MeineTK,Diseasemanagement-Programme,13
+Krankenhausaufenthalt,Diseasemanagement-Programme,4
+Arbeitgeberbeitrag,Gerichtsverzeichnis,8
+Widerspruchsbearbeitung,Gerichtsverzeichnis,11
+Insolvenzmanagement,Gerichtsverzeichnis,5
+TK-Konto (TKeasy-GUI  Schriftgut),Gerichtsverzeichnis,7
+Pruefung der Leistungspflicht - PLP,Gerichtsverzeichnis,3
+Versichertenbestandsfuehrung,Gerichtsverzeichnis,8
+Geschaeftspartner,Gerichtsverzeichnis,9
+Einzug von Zuzahlungen,Gerichtsverzeichnis,3
+Versichertenbestandsfuehrung,Hochschul-Meldungen,53
+Studienverlauf,Hochschul-Meldungen,1887
+CRM-Akquisemanager,Hochschul-Meldungen,23
+TK-Termin,CRM-Empfangssteuerung,13
+Psychotherapie,Wahl der Kostenerstattung,15
+Kur,Wahl der Kostenerstattung,48
+Hilfsmittel,Wahl der Kostenerstattung,32
+Rehasport und Funktionstraining,Wahl der Kostenerstattung,8
+Kieferorthopaedie,Wahl der Kostenerstattung,6
+MeineTK,Wahl der Kostenerstattung,82
+Sonstige Leistungen,Wahl der Kostenerstattung,18
+Leistungsuebersicht,Wahl der Kostenerstattung,7
+Optimization,Wahl der Kostenerstattung,1
+Leistungen-Basis,Wahl der Kostenerstattung,45
+Haeusliche Krankenpflege,Leistungsuebersicht,17
+Psychotherapie,Leistungsuebersicht,23
+Pruefung der Leistungspflicht - PLP,Leistungsuebersicht,64
+KI-Basis,Leistungsuebersicht,7
+DA Zahnaerzte / Behandlungsfallnachweis,Leistungsuebersicht,18
+Kinderkrankengeld (KKG),Leistungsuebersicht,132
+Mutterschaftsgeld (MUG),Leistungsuebersicht,67
+Kur,Leistungsuebersicht,48
+Pflegeunterstuetzungsgeld,Leistungsuebersicht,31
+Mitteilungsmanagement,Leistungsuebersicht,7
+Erstattung von AG-Aufwendungen,Leistungsuebersicht,53
+Wahltarife,Leistungsuebersicht,9
+Rehasport und Funktionstraining,Leistungsuebersicht,8
+Leistungen-Basis,Leistungsuebersicht,19
+Haertefall - Belastungsgrenze,Leistungsuebersicht,8
+UI-Components,Leistungsuebersicht,19
+Sonstige Leistungen,Leistungsuebersicht,94
+Fahrkosten,Leistungsuebersicht,7
+CRM,Leistungsuebersicht,68
+LM-Fallfuehrung,Leistungsuebersicht,73
+Wahl der Kostenerstattung,Leistungsuebersicht,9
+Versichertenbestandsfuehrung,Leistungsuebersicht,15
+Unfall,Leistungsuebersicht,288
+Zahnersatz,Leistungsuebersicht,18
+Entgeltersatzleistungen,Leistungsuebersicht,132
+Pflegeversicherung,Leistungsuebersicht,68
+Hilfsmittel,Leistungsuebersicht,60
+Einzug von Zuzahlungen,Leistungsuebersicht,28
+Hausarztzentrierte Versorgung (HzV),Leistungsuebersicht,5
+Sozialhilfetraeger,Leistungsuebersicht,11
+Arbeitsunfaehigkeit,Leistungsuebersicht,57
+Kostenerstattung,Leistungsuebersicht,36
+DA Entgeltersatzleistungen,Leistungsuebersicht,31
+Krankenhausaufenthalt,Leistungsuebersicht,121
+CRM-Akquisemanager,Adress-Service,68
+SozV-Meldungen,Adress-Service,19
+Behandler-Verzeichnis,Adress-Service,51
+Gesundheitskarte (eGK),Adress-Service,14
+"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Adress-Service,2
+KVNr-Meldungen,Adress-Service,14
+Melderegisterabgleich,Adress-Service,23
+Pflegeversicherung,Adress-Service,12
+Ambulante Versorgungsabrechnungen,Adress-Service,2
+Studienverlauf,Adress-Service,2
+Geschaeftspartner,Adress-Service,18
+CRM,Adress-Service,8
+Versichertenbestandsfuehrung,Adress-Service,83
+MeineTK,Adress-Service,2
+Mitgliederbeitrag,Adress-Service,1
+Praeventionskurse,Adress-Service,10
+tk.de,Adress-Service,6
+Fahrkosten,Adress-Service,14
+Vertriebsmanagement,Adress-Service,2
+Arbeitgeberbestandsfuehrung,Adress-Service,8
+UI-Components,Adress-Service,22
+Pflegeperson,Adress-Service,35

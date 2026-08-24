@@ -1,0 +1,19 @@
+server:
+  port: 8085
+
+spring:
+  application:
+    name: cytoscape-graph-viewer
+
+cytoscape-graph:
+  viewer:
+    base-url: /cytoscape
+    default-csp: "script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'"
+
+# Set to false to disable the RAP servlet registration (useful for running
+# just the REST + static-asset layer on Jetty 12, where RAP 4.4 startup
+# fails). With rap.enabled=false, GET /api/sample-graph and the static
+# assets in /cytoscape/, /vis-network/, /vis-graph/, /cytoscape-viewer.html
+# remain reachable; only the RAP entry point /graph is disabled.
+rap:
+  enabled: true

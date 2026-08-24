@@ -1,0 +1,10 @@
+target/
+*.class
+*.log
+
+# NPM frontend build artifacts (installed deps and caches)
+src/main/frontend/node_modules/
+
+# Maven-downloaded Node.js binary
+src/main/frontend/node/
+src/main/frontend/.npm/

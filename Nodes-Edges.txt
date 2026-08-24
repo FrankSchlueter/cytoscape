@@ -1,0 +1,15 @@
+Nodes:
+    Row Filters: Combo 1: All, Community, Liste der Tag Properties      Combo 2:    All: Disabled
+                                                                                    Community: Liste der Communities
+                                                                                    Tag: Liste der Tag Werte der Property
+
+    Column Filters: Liste der verfügbaren Properties aller Nodes
+
+    Zusätzliche Properties: Anzahl In/Out Edges ggf. Sum Weight In/Out
+
+    Tabelle der Nodes
+
+Edges:
+    Combo: All, Selected
+
+
