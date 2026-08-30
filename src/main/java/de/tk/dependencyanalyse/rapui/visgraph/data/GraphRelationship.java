@@ -312,7 +312,7 @@ public final class GraphRelationship {
         Double w = getWeight();
         if (w != null) {
             data.put(PROP_WEIGHT, w);
-            data.put("log10Weight", Math.log10(getEffectiveWeight()));
+            data.put("log10Weight", Math.log(getEffectiveWeight()+1));
         }
         for (Map.Entry<String, Object> e : properties.entrySet()) {
             if (data.containsKey(e.getKey())) continue;

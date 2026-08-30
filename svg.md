@@ -131,6 +131,24 @@ if (uris.length === 0) {
 
 **Lesson**: Layout-Runs in Cytoscape müssen in `cy.batch(...)` gewrapped sein oder auf den nächsten Render-Tick warten. Wir lösen das, indem `runPostLoadLayout` als Reaktion auf den Image-Load-Event läuft — dann ist der Render-Pass aus `cy.batch` längst abgeschlossen.
 
+### 8. vis-Network's ColorSpec nutzt `color`, NICHT `background`
+
+`SvgBadgeColorUpdater.applyRecolorsBoth` produziert für Plain-Nodes `{background, border}`-Updates. vis-Network's `parseOptions` aber kennt nur die Keys `color`, `highlight`, `hover`, `inherit`, `opacity` im ColorSpec — die Keys `background` und `border` werden **stillschweigend ignoriert**.
+
+Symptom: Plain-Nodes werden in vis-Network nicht neu eingefärbt, obwohl `options.color.background` in vis-Network-State nach dem Update den neuen Wert enthält (das `background`-Property wird gespeichert, hat aber keinen Render-Effekt).
+
+**Lösung**: ColorSpec mit `color`, `highlight`, `hover` pushen:
+
+```java
+Map<String, Object> color = new LinkedHashMap<>();
+color.put("color", newColor);
+color.put("highlight", newColor);
+color.put("hover", newColor);
+upd.put("color", color);
+```
+
+**Lesson**: Wenn ein Viewer eine Property-Spec hat, müssen wir die **exakten** Property-Namen verwenden — auch wenn die Namen aus einem anderen Kontext (z. B. CSS) vertraut aussehen. `background` ist CSS-Sprache, vis-Network spricht `color`.
+
 ## Strategien
 
 ### Einheitliches Wire-Format für beide Viewer
@@ -277,7 +295,7 @@ Cytoscape's Image-Cache akzeptiert **beide** Formate, aber SVG-Images sind resso
 | Cytoscape-Edges verschwinden nach Recolor | Layout läuft vor Image-Loads | `runPostLoadLayout` im Image-Load-Handler |
 | Cytoscape "alter Graph"-Flash | `cy.batch` ist async | `cy.resize()` synchron im Load-Handler |
 | Plain-Nodes nicht Recolored (Cytoscape) | Style-Selector nicht aktualisiert | `applyNodeConfig` ruft Style-Push |
-| Plain-Nodes nicht Recolored (vis) | vis hat keine Style-Engine | `applyRecolorsBoth` pusht `color`-Updates |
+| Plain-Nodes nicht Recolored (vis) | vis hat keine Style-Engine | `applyRecolorsBoth` pusht `{color, highlight, hover}`-Updates (ColorSpec, **nicht** `background`!) |
 
 ## Quellen
 

@@ -10,6 +10,8 @@ import de.tk.dependencyanalyse.rapui.visgraph.data.HierarchicalDirection;
 import de.tk.dependencyanalyse.rapui.visgraph.data.LayoutAlgorithm;
 import de.tk.dependencyanalyse.rapui.visgraph.data.PhysicsSolver;
 import de.tk.dependencyanalyse.rapui.visgraph.engine.GraphEngine;
+
+import java.util.Map;
 import de.tk.dependencyanalyse.rapui.visgraph.internal.VisJsBridge;
 import org.eclipse.swt.browser.Browser;
 import org.eclipse.swt.widgets.Composite;
@@ -143,6 +145,19 @@ public class GraphViewer extends Browser {
 
     public void clear() {
         runWhenReady(bridge::clear);
+    }
+
+    /**
+     * Push a per-node Leiden-cluster color map to the iframe. Pairs with
+     * {@link GraphConfigurationDialog}'s "Apply Leiden Clustering" button
+     * — {@link SwitchingViewer} routes the call to whichever engine is
+     * currently active. The JS handler iterates the map and emits a
+     * {@code nodes.update} per node so vis-network's per-node color
+     * (rather than a stylesheet selector) carries the recolor.
+     */
+    public void setLeidenClusterColors(Map<String, String> colors) {
+        if (colors == null) return;
+        runWhenReady(() -> bridge.setLeidenClusterColors(colors));
     }
 
     public void fitToScreen() {

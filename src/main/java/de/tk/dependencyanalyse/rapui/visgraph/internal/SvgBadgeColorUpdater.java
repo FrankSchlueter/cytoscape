@@ -144,13 +144,21 @@ public final class SvgBadgeColorUpdater {
                 upd.put("image", rendered);
                 updates.add(upd);
             } else {
-                // Plain node: push color.background so vis-network's
-                // ellipse/box/circle/etc. shape picks it up.
+                // Plain node: push vis-network's ColorSpec — `color`
+                // (NOT `background`!) drives the shape fill. `highlight`
+                // and `hover` default to `color` when omitted but we set
+                // them explicitly so highlight/hover stay in sync with
+                // the new background. vis-network's parseOptions reads
+                // `color` from the incoming object and writes it into
+                // the node's `options.color.color` — passing
+                // `{background: ...}` silently does nothing because
+                // vis-network does not understand that key.
                 Map<String, Object> upd = new LinkedHashMap<>();
                 upd.put("id", n.getId());
                 Map<String, Object> color = new LinkedHashMap<>();
-                color.put("background", newColor);
-                color.put("border", newColor);
+                color.put("color", newColor);
+                color.put("highlight", newColor);
+                color.put("hover", newColor);
                 upd.put("color", color);
                 updates.add(upd);
             }

@@ -184,4 +184,34 @@ class VisGraphViewerJsSourceTest {
                         + "new image / color is visible immediately, even when no property "
                         + "value actually changed (vis-network skips re-renders in that case)");
     }
+
+    @Test
+    void vgvApplyLeidenColorsHandlerRecolorsPlainNodes() throws Exception {
+        // The Leiden-cluster pipeline (GraphConfigurationDialog → vis-graph
+        // bridge → iframe) needs a JS handler that converts the per-node
+        // color map into vis-network-compatible updates. Without it, the
+        // "Apply Leiden Clustering" button is a no-op for vis-network:
+        // the colors are pushed from Java but the iframe ignores them.
+        String src = readViewerJs();
+        assertTrue(src.contains("window.vgv_applyLeidenColors"),
+                "vis-graph-viewer.js must register window.vgv_applyLeidenColors");
+        java.util.regex.Pattern body = java.util.regex.Pattern.compile(
+                "vgv_applyLeidenColors\\s*=\\s*function\\s*\\([^)]*\\)\\s*\\{([\\s\\S]*?)\\n\\s{4}\\}");
+        java.util.regex.Matcher m = body.matcher(src);
+        assertTrue(m.find(), "vgv_applyLeidenColors must define a function body");
+        String fn = m.group(1);
+        // Must iterate the color map and push one nodes.update entry per
+        // node with vis-network's ColorSpec (background + border +
+        // highlight/hover overrides).
+        assertTrue(fn.contains("nodes.update"),
+                "vgv_applyLeidenColors must call nodes.update() so vis-network "
+                        + "re-renders the node with the new color");
+        assertTrue(fn.contains("background"),
+                "vgv_applyLeidenColors must write the color into the "
+                        + "color.background slot — vis-network's ellipse/box/circle shapes "
+                        + "read `color.background` for the shape fill, NOT `color.color`");
+        assertTrue(fn.contains("network.redraw"),
+                "vgv_applyLeidenColors must force a synchronous network.redraw() so the "
+                        + "new cluster colors are visible immediately");
+    }
 }

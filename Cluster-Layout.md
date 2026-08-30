@@ -39,7 +39,7 @@ const elements = [
 ## Schritt 3: Mathematische Kanten-Stauchung
 Nutzen Sie für die Layoutkräfte zwingend den natürlichen Logarithmus der Gewichte:
 ```java
-logWeight = ln(OriginalGewicht + 1)
+logWeight = log(OriginalGewicht + 1)
 ```
 
 Dadurch rücken extrem starke Knoten nicht zu nah aneinander, und schwache Knoten fliegen nicht aus dem Sichtfeld.

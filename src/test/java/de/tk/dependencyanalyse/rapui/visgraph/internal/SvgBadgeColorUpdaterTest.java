@@ -252,10 +252,12 @@ class SvgBadgeColorUpdaterTest {
 
     @Test
     void applyRecolorsBoth_PlainNodeProducesColorUpdate() {
-        // A plain (non-badge) node must emit a color.background update so
-        // vis-network's ellipse/box/etc. shape picks it up. vis-network has
-        // no stylesheet engine like Cytoscape, so the color has to ride
-        // on the node itself.
+        // A plain (non-badge) node must emit a vis-network ColorSpec
+        // update so the ellipse/box/circle/etc. shape picks up the new
+        // color. vis-network's parseOptions reads `color` from the
+        // incoming object and writes it into the node's options.color;
+        // a `{background: ...}` key is silently ignored by vis-network,
+        // so we MUST use the `color` key for the shape fill.
         GraphNode plain = new GraphNode("plain", List.of("Class"),
                 Map.of("name", "Plain", "_nodeType_", "Class"));
         GraphData data = new GraphData(List.of(plain), List.of());
@@ -271,12 +273,16 @@ class SvgBadgeColorUpdaterTest {
         assertEquals("plain", upd.get("id"));
         // No image key — plain nodes don't carry an SVG badge.
         assertFalse(upd.containsKey("image"));
-        // Color key must carry both background and border.
+        // Color key must carry the vis-network ColorSpec fields.
         @SuppressWarnings("unchecked")
         Map<String, Object> color = (Map<String, Object>) upd.get("color");
         assertNotNull(color, "plain-node update must carry a color object");
-        assertEquals("#FF0000", color.get("background"));
-        assertEquals("#FF0000", color.get("border"));
+        assertEquals("#FF0000", color.get("color"),
+                "vis-network reads `color` (not `background`) to drive the shape fill");
+        assertEquals("#FF0000", color.get("highlight"),
+                "highlight must follow color so hover/selected stays in sync");
+        assertEquals("#FF0000", color.get("hover"),
+                "hover must follow color so hover/selected stays in sync");
     }
 
     @Test
@@ -344,7 +350,8 @@ class SvgBadgeColorUpdaterTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> plainColor =
                 (Map<String, Object>) plainUpdate.get("color");
-        assertEquals("#0000FF", plainColor.get("background"));
+        assertEquals("#0000FF", plainColor.get("color"),
+                "MixedNode update must use vis-network's `color` key, not `background`");
     }
 
     @Test

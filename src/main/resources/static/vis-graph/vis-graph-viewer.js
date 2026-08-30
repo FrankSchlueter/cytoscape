@@ -277,6 +277,48 @@
         try { network.redraw(); } catch (e) { /* ignore */ }
     };
 
+    /**
+     * Apply a per-node Leiden-cluster color map (id → hex) to the vis-
+     * network nodes. Pairs with {@code VisJsBridge.setLeidenClusterColors}
+     * which is invoked by {@code GraphConfigurationDialog} when the
+     * "Apply Leiden Clustering" button is clicked. Each known node
+     * receives a {@code {color, highlight, hover}} update via
+     * {@code nodes.update} — vis-network's ColorSpec keys, NOT
+     * {@code background}. A trailing {@code network.redraw()} makes the
+     * recolor visible even when none of the values actually changed
+     * (vis-network otherwise skips re-rendering identical property
+     * values).
+     */
+    window.vgv_applyLeidenColors = function (colors) {
+        if (!networkReady || !colors) return;
+        var updates = [];
+        Object.keys(colors).forEach(function (nodeId) {
+            var color = colors[nodeId];
+            if (!color) return;
+            // vis-network's color spec is shape-dependent. For ellipse /
+            // box / circle / database / etc. the primary fill reads
+            // `color.background` (NOT `color.color` as the docs suggest).
+            // The highlight / hover slots are nested objects with their
+            // own `background` and `border`. To make the recolor
+            // actually take effect we therefore push the Leiden color
+            // into ALL three: the primary background, plus matching
+            // highlight / hover overrides so the node stays the same
+            // color in selected / hover state.
+            updates.push({
+                id: nodeId,
+                color: {
+                    background: color,
+                    border: color,
+                    highlight: { background: color, border: color },
+                    hover: { background: color, border: color }
+                }
+            });
+        });
+        if (updates.length === 0) return;
+        nodes.update(updates);
+        try { network.redraw(); } catch (e) { /* ignore */ }
+    };
+
     /* ----- API: SVG node images ----- */
 
     /**

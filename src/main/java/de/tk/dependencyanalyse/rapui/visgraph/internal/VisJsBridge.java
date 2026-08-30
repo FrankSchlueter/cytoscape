@@ -86,6 +86,17 @@ public final class VisJsBridge {
 
     public NodeConfig getCurrentNodeConfig() { return currentNodeConfig; }
 
+    /**
+     * Push a per-node Leiden-cluster color map to the iframe. vis-network
+     * has no stylesheet engine, so each node must receive its own
+     * {@code color} update via {@code nodes.update}. The payload format
+     * mirrors the Cytoscape side ({@code {id → hex}}) — the JS handler
+     * applies it uniformly to every node present in {@code network.body.nodes}.
+     */
+    public void setLeidenClusterColors(Map<String, String> colors) {
+        exec("window.vgv_applyLeidenColors(" + gson.toJson(colors) + ");");
+    }
+
     public void applyData(GraphData data) {
         this.currentData = data;
         Map<String, Object> payload = data.toVisNetworkData(currentNodeConfig);

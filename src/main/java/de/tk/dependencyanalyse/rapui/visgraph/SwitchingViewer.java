@@ -153,9 +153,9 @@ public class SwitchingViewer extends Composite {
     public void setLeidenClusterColors(Map<String, String> colors) {
         if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
             cytoscapeViewer.setLeidenClusterColors(colors);
+        } else if (visViewer != null) {
+            visViewer.setLeidenClusterColors(colors);
         }
-        // vis-network: no equivalent yet — colors could be pushed via
-        // setNodeConfig if desired. Currently a no-op for vis.
     }
 
     public void fitToScreen() {
