@@ -4,6 +4,8 @@ import de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig;
 import de.tk.dependencyanalyse.rapui.visgraph.config.TagProperty;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphData;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphNode;
+import de.tk.dependencyanalyse.rapui.visgraph.data.LegendBuilder;
+import de.tk.dependencyanalyse.rapui.visgraph.data.LegendEntry;
 import de.tk.dependencyanalyse.rapui.visgraph.data.Shape;
 import de.tk.dependencyanalyse.rapui.visgraph.engine.GraphEngine;
 import org.eclipse.swt.SWT;
@@ -103,6 +105,9 @@ public class GraphConfigurationDialog extends Dialog {
     /** Possible values of the Node-Type mode combo. */
     private enum NodeTypeMode { SHAPE, COLOR }
 
+    /** Possible sources for the legend panel. */
+    private enum LegendSource { COMBINED, TAG_VALUES, LEIDEN_CLUSTERS, NODE_TYPES }
+
     private final SwitchingViewer viewer;
     private final GraphData data;
     private final GraphEngine engine;
@@ -121,6 +126,17 @@ public class GraphConfigurationDialog extends Dialog {
     private Label leidenStatus;
 
     private Button closeButton;
+
+    // ---- legend widgets ----
+    private Button legendEnableCheck;
+    private Button legendShowCheck;
+    private Combo legendSourceCombo;
+    private Table legendPreviewTable;
+    private Button legendApplyButton;
+    private Button legendClearButton;
+    private Label legendHint;
+    private LegendSource legendSource = LegendSource.COMBINED;
+    private List<LegendEntry> legendPreview = List.of();
 
     // ---- state ----
     private List<String> nodeTypeValues;
@@ -314,6 +330,13 @@ public class GraphConfigurationDialog extends Dialog {
 
         leidenStatus = new Label(shell, SWT.NONE);
         leidenStatus.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+
+        /* ---- Legend (optional) section ---- */
+        Label sectionLegend = new Label(shell, SWT.NONE);
+        sectionLegend.setText("Legend (optional):");
+        sectionLegend.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+
+        buildLegendSection();
 
         /* ---- Close ---- */
         closeButton = new Button(shell, SWT.PUSH);
@@ -725,6 +748,15 @@ public class GraphConfigurationDialog extends Dialog {
         }
 
         viewer.setNodeConfig(b.build());
+
+        // Tag / NodeType colors changed — refresh and re-push the legend so
+        // the panel reflects the latest color mapping without requiring a
+        // separate "Apply to Viewer" click.
+        if (legendEnableCheck != null && legendEnableCheck.getSelection()) {
+            refreshLegendSectionEnabled();
+            rebuildLegendPreview();
+            pushLegend();
+        }
     }
 
     /* ============================================================== */
@@ -777,5 +809,217 @@ public class GraphConfigurationDialog extends Dialog {
         viewer.setLeidenClusterColors(colors);
         long distinct = colors.values().stream().distinct().count();
         leidenStatus.setText("Clustering angewendet: " + distinct + " Communities.");
+        // Refresh the legend preview + push it so the panel updates
+        // immediately with the new cluster counts and the new colors.
+        if (legendEnableCheck != null && legendEnableCheck.getSelection()) {
+            rebuildLegendPreview();
+            pushLegend();
+        }
+    }
+
+    /* ============================================================== */
+    /*  Legend (optional)                                              */
+    /* ============================================================== */
+
+    /**
+     * Build the legend section. Always shown — but the controls start
+     * disabled when the graph has no nodeTypes, no tag mapping, and no
+     * Leiden colors yet (nothing to legend up).
+     */
+    private void buildLegendSection() {
+        legendEnableCheck = new Button(shell, SWT.CHECK);
+        legendEnableCheck.setText("Enable Legend");
+        legendEnableCheck.setSelection(false);
+        GridData enGD = new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1);
+        legendEnableCheck.setLayoutData(enGD);
+        legendEnableCheck.addSelectionListener(new SelectionAdapter() {
+            @Override public void widgetSelected(SelectionEvent e) {
+                refreshLegendSectionEnabled();
+                rebuildLegendPreview();
+                // Auto-apply: the user shouldn't need a separate "Apply to
+                // Viewer" click — enabling the checkbox should immediately
+                // surface the legend in the canvas.
+                pushLegend();
+            }
+        });
+
+        legendShowCheck = new Button(shell, SWT.CHECK);
+        legendShowCheck.setText("Show in viewer");
+        legendShowCheck.setSelection(true);
+        legendShowCheck.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+        legendShowCheck.addSelectionListener(new SelectionAdapter() {
+            @Override public void widgetSelected(SelectionEvent e) {
+                pushLegend();
+            }
+        });
+
+        Composite srcRow = new Composite(shell, SWT.NONE);
+        srcRow.setLayout(new GridLayout(2, false));
+        srcRow.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+        Label srcLabel = new Label(srcRow, SWT.NONE);
+        srcLabel.setText("Source:");
+        legendSourceCombo = new Combo(srcRow, SWT.READ_ONLY | SWT.DROP_DOWN);
+        legendSourceCombo.setItems(new String[] {
+                "Combined (Tag → Cluster → NodeType)",
+                "Tag Values only",
+                "Leiden Clusters only",
+                "Node Types only"
+        });
+        legendSourceCombo.select(0);
+        legendSource = LegendSource.COMBINED;
+        legendSourceCombo.addSelectionListener(new SelectionAdapter() {
+            @Override public void widgetSelected(SelectionEvent e) {
+                legendSource = LegendSource.values()[legendSourceCombo.getSelectionIndex()];
+                rebuildLegendPreview();
+                // Source change updates the legend contents — auto-push.
+                pushLegend();
+            }
+        });
+
+        legendPreviewTable = new Table(shell,
+                SWT.BORDER | SWT.V_SCROLL | SWT.H_SCROLL | SWT.FULL_SELECTION);
+        legendPreviewTable.setHeaderVisible(true);
+        legendPreviewTable.setLinesVisible(true);
+        GridData lgGD = new GridData(SWT.FILL, SWT.FILL, true, true, 2, 1);
+        lgGD.minimumHeight = 120;
+        legendPreviewTable.setLayoutData(lgGD);
+        TableColumn colCol = new TableColumn(legendPreviewTable, SWT.LEFT);
+        colCol.setText("Color");
+        colCol.setWidth(80);
+        TableColumn colLab = new TableColumn(legendPreviewTable, SWT.LEFT);
+        colLab.setText("Label");
+        colLab.setWidth(260);
+        TableColumn colCnt = new TableColumn(legendPreviewTable, SWT.RIGHT);
+        colCnt.setText("Count");
+        colCnt.setWidth(60);
+
+        legendHint = new Label(shell, SWT.NONE);
+        legendHint.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+
+        Composite btnRow = new Composite(shell, SWT.NONE);
+        btnRow.setLayout(new GridLayout(2, true));
+        btnRow.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+        legendApplyButton = new Button(btnRow, SWT.PUSH);
+        legendApplyButton.setText("Apply to Viewer");
+        legendApplyButton.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+        legendApplyButton.addSelectionListener(new SelectionAdapter() {
+            @Override public void widgetSelected(SelectionEvent e) {
+                rebuildLegendPreview();
+                pushLegend();
+            }
+        });
+        legendClearButton = new Button(btnRow, SWT.PUSH);
+        legendClearButton.setText("Clear");
+        legendClearButton.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+        legendClearButton.addSelectionListener(new SelectionAdapter() {
+            @Override public void widgetSelected(SelectionEvent e) {
+                legendPreview = List.of();
+                rebuildLegendPreviewTable();
+                if (viewer != null) viewer.clearLegend();
+                if (legendHint != null) legendHint.setText("Legend: geleert.");
+            }
+        });
+
+        refreshLegendSectionEnabled();
+    }
+
+    /**
+     * Enable / disable the legend source combo + buttons depending on
+     * whether there's anything to show. The checkbox stays editable so
+     * the user can pre-arm the section before applying a clustering.
+     */
+    private void refreshLegendSectionEnabled() {
+        boolean enabled = legendEnableCheck != null && legendEnableCheck.getSelection();
+        boolean hasAnySource =
+                !nodeTypeValues.isEmpty() || hasGlobalTagColors() || hasLeidenColors();
+        if (legendShowCheck != null) legendShowCheck.setEnabled(enabled);
+        if (legendSourceCombo != null) legendSourceCombo.setEnabled(enabled);
+        if (legendPreviewTable != null) legendPreviewTable.setEnabled(enabled);
+        if (legendApplyButton != null) legendApplyButton.setEnabled(enabled && hasAnySource);
+        if (legendClearButton != null) legendClearButton.setEnabled(enabled);
+        if (legendHint != null && !enabled) {
+            legendHint.setText("Legend: deaktiviert (Checkbox anhaken, dann Apply to Viewer).");
+        } else if (legendHint != null && !hasAnySource) {
+            legendHint.setText("Legend: keine Daten vorhanden — bitte erst Tag-/Cluster-/NodeType-Mapping setzen.");
+        }
+    }
+
+    private boolean hasGlobalTagColors() {
+        return currentTagProperty != null && !tagColorMap.isEmpty();
+    }
+
+    private boolean hasLeidenColors() {
+        if (viewer == null) return false;
+        Map<String, String> map = viewer.getLeidenClusterColors();
+        return map != null && !map.isEmpty();
+    }
+
+    /** Compute the legend preview from the current dialog state + viewer. */
+    private void rebuildLegendPreview() {
+        if (legendEnableCheck == null || !legendEnableCheck.getSelection()) {
+            legendPreview = List.of();
+            rebuildLegendPreviewTable();
+            return;
+        }
+        NodeConfig cfg = viewer != null ? viewer.getNodeConfig() : null;
+        if (cfg == null) cfg = NodeConfig.defaults();
+        Map<String, String> leiden = viewer == null ? Map.of() : viewer.getLeidenClusterColors();
+        switch (legendSource) {
+            case COMBINED:
+                legendPreview = LegendBuilder.combined(data, cfg, leiden);
+                break;
+            case TAG_VALUES:
+                legendPreview = LegendBuilder.fromTagValues(data, cfg);
+                break;
+            case LEIDEN_CLUSTERS:
+                legendPreview = LegendBuilder.fromLeidenClusters(data, leiden);
+                break;
+            case NODE_TYPES:
+                legendPreview = LegendBuilder.fromNodeTypes(data, cfg);
+                break;
+            default:
+                legendPreview = List.of();
+        }
+        rebuildLegendPreviewTable();
+    }
+
+    /** Repaint the preview table from {@link #legendPreview}. */
+    private void rebuildLegendPreviewTable() {
+        if (legendPreviewTable == null) return;
+        legendPreviewTable.removeAll();
+        if (legendPreview.isEmpty()) {
+            if (legendHint != null && legendEnableCheck.getSelection()) {
+                legendHint.setText("Legend: keine Einträge für Quelle '" + legendSource
+                        + "' — Apply überspringen.");
+            }
+            return;
+        }
+        if (legendHint != null) {
+            legendHint.setText("Legend: " + legendPreview.size() + " Einträge — Apply to Viewer pusht sie an "
+                    + (engine == GraphEngine.VIS_NETWORK ? "vis-network" : "Cytoscape") + ".");
+        }
+        for (LegendEntry e : legendPreview) {
+            TableItem item = new TableItem(legendPreviewTable, SWT.NONE);
+            item.setText(0, e.colorHex());
+            item.setText(1, e.label());
+            item.setText(2, Integer.toString(e.count()));
+        }
+    }
+
+    /** Push the current legend state to the active engine. */
+    private void pushLegend() {
+        if (viewer == null) return;
+        boolean enabled = legendEnableCheck != null && legendEnableCheck.getSelection()
+                && legendShowCheck != null && legendShowCheck.getSelection();
+        viewer.setLegend(legendPreview, enabled);
+        if (legendHint != null) {
+            if (!enabled) {
+                legendHint.setText("Legend: im Viewer ausgeblendet (Show in viewer ist aus).");
+            } else if (legendPreview.isEmpty()) {
+                legendHint.setText("Legend: keine Einträge — Panel bleibt verborgen.");
+            } else {
+                legendHint.setText("Legend: " + legendPreview.size() + " Einträge an Viewer gepusht.");
+            }
+        }
     }
 }

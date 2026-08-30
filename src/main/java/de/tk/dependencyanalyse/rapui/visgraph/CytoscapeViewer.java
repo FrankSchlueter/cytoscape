@@ -7,6 +7,7 @@ import de.tk.dependencyanalyse.rapui.visgraph.callback.SelectionClearedListener;
 import de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphData;
 import de.tk.dependencyanalyse.rapui.visgraph.data.LayoutAlgorithm;
+import de.tk.dependencyanalyse.rapui.visgraph.data.LegendEntry;
 import de.tk.dependencyanalyse.rapui.visgraph.engine.GraphEngine;
 import de.tk.dependencyanalyse.rapui.visgraph.internal.CytoscapeJsBridge;
 import org.eclipse.swt.browser.Browser;
@@ -128,6 +129,20 @@ public class CytoscapeViewer extends Browser {
     public void setLeidenClusterColors(Map<String, String> colors) {
         if (colors == null) return;
         runWhenReady(() -> bridge.setLeidenColors(colors));
+    }
+
+    /**
+     * Push the optional color legend to the iframe. {@code enabled} controls
+     * the panel's visibility. {@link SwitchingViewer#setLegend} routes this
+     * call to whichever engine is currently active.
+     */
+    public void setLegend(List<LegendEntry> entries, boolean enabled) {
+        runWhenReady(() -> bridge.applyLegend(entries, enabled));
+    }
+
+    /** Remove the legend panel entirely (entries cleared + panel hidden). */
+    public void clearLegend() {
+        runWhenReady(bridge::clearLegend);
     }
 
     /* ---- selection ---- */

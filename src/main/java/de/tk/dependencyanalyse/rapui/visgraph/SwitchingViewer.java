@@ -7,12 +7,14 @@ import de.tk.dependencyanalyse.rapui.visgraph.callback.SelectionClearedListener;
 import de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphData;
 import de.tk.dependencyanalyse.rapui.visgraph.data.LayoutAlgorithm;
+import de.tk.dependencyanalyse.rapui.visgraph.data.LegendEntry;
 import de.tk.dependencyanalyse.rapui.visgraph.engine.GraphEngine;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Event;
 import org.eclipse.swt.widgets.Listener;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -41,6 +43,12 @@ public class SwitchingViewer extends Composite {
     private ContextMenuProvider currentContextMenuProvider;
     private GraphEngine currentEngine = GraphEngine.VIS_NETWORK;
 
+    /** Last Leiden cluster colors pushed via {@link #setLeidenClusterColors}. */
+    private Map<String, String> currentLeidenColors = Map.of();
+    /** Legend state. {@code null} means no legend has ever been set. */
+    private List<LegendEntry> currentLegend = List.of();
+    private boolean legendEnabled = false;
+
     private GraphViewer visViewer;
     private CytoscapeViewer cytoscapeViewer;
 
@@ -66,6 +74,10 @@ public class SwitchingViewer extends Composite {
      * Switch to the requested engine. Disposes the existing viewer and
      * creates a fresh one with the current data, node-config, layout, and
      * context-menu provider restored.
+     *
+     * <p>The optional legend payload (if {@link #setLegend} has been called
+     * previously) is re-applied to the new engine so the panel survives an
+     * engine switch without user intervention.</p>
      */
     public void switchTo(GraphEngine engine) {
         if (engine == null || engine == currentEngine) return;
@@ -80,15 +92,30 @@ public class SwitchingViewer extends Composite {
             if (!currentLayoutOptions.isEmpty()) {
                 cytoscapeViewer.setLayoutOptions(currentLayoutOptions);
             }
+            if (!currentLeidenColors.isEmpty()) {
+                cytoscapeViewer.setLeidenClusterColors(currentLeidenColors);
+            }
         } else {
             visViewer = new GraphViewer(this, SWT.NONE);
             wireViewer(visViewer);
             if (currentData != null) visViewer.setGraphData(currentData);
             if (currentNodeConfig != null) visViewer.setNodeConfig(currentNodeConfig);
             visViewer.setLayout(currentLayout);
+            if (!currentLeidenColors.isEmpty()) {
+                visViewer.setLeidenClusterColors(currentLeidenColors);
+            }
         }
         if (currentContextMenuProvider != null) {
             setContextMenuProvider(currentContextMenuProvider);
+        }
+        // Re-apply the legend AFTER everything else so the panel sits on top
+        // of the freshly-applied data and styles.
+        if (legendEnabled) {
+            if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
+                cytoscapeViewer.setLegend(currentLegend, true);
+            } else if (visViewer != null) {
+                visViewer.setLegend(currentLegend, true);
+            }
         }
         layout(true, true);
         for (EngineListener l : engineListeners) {
@@ -151,11 +178,64 @@ public class SwitchingViewer extends Composite {
     }
 
     public void setLeidenClusterColors(Map<String, String> colors) {
+        if (colors == null) return;
+        this.currentLeidenColors = Map.copyOf(colors);
         if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
-            cytoscapeViewer.setLeidenClusterColors(colors);
+            cytoscapeViewer.setLeidenClusterColors(currentLeidenColors);
         } else if (visViewer != null) {
-            visViewer.setLeidenClusterColors(colors);
+            visViewer.setLeidenClusterColors(currentLeidenColors);
         }
+    }
+
+    /**
+     * Returns the most recent Leiden color map (id → hex) pushed to the
+     * active engine, or an empty map when clustering has not been applied.
+     * Used by the {@link GraphConfigurationDialog} Legend section when the
+     * user picks {@code Source = Leiden Clusters} or {@code Combined}.
+     */
+    public Map<String, String> getLeidenClusterColors() {
+        return currentLeidenColors;
+    }
+
+    /**
+     * Push the optional legend panel to the active engine. {@code entries}
+     * is the full row list (color, label, count) in panel-render order;
+     * {@code enabled} controls visibility — when {@code false} the panel
+     * hides but the entries are kept so toggling back on restores it.
+     *
+     * <p>The legend payload survives engine switches — after
+     * {@link #switchTo(GraphEngine)} the panel is re-applied to the fresh
+     * engine automatically.</p>
+     */
+    public void setLegend(List<LegendEntry> entries, boolean enabled) {
+        this.currentLegend = entries == null ? List.of() : List.copyOf(entries);
+        this.legendEnabled = enabled;
+        if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
+            cytoscapeViewer.setLegend(currentLegend, enabled);
+        } else if (visViewer != null) {
+            visViewer.setLegend(currentLegend, enabled);
+        }
+    }
+
+    /** Hide the legend panel and discard the cached entries. */
+    public void clearLegend() {
+        this.currentLegend = List.of();
+        this.legendEnabled = false;
+        if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
+            cytoscapeViewer.clearLegend();
+        } else if (visViewer != null) {
+            visViewer.clearLegend();
+        }
+    }
+
+    /** Returns the currently configured legend entries (immutable copy). */
+    public List<LegendEntry> getLegend() {
+        return currentLegend;
+    }
+
+    /** Whether the legend panel is currently configured to be visible. */
+    public boolean isLegendEnabled() {
+        return legendEnabled;
     }
 
     public void fitToScreen() {

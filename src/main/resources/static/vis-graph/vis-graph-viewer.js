@@ -35,6 +35,11 @@
     var contextMenuCurrent = null;
     var pendingData = null;
     var networkReady = false;
+    // Legend state
+    var legendEntries = [];
+    var legendEnabled = false;
+    var activeLegendColor = null;
+    var legendCollapsed = false;
 
 
     /**
@@ -158,6 +163,10 @@
             var sn = network.getSelectedNodes();
             var se = network.getSelectedEdges();
             if (sn.length === 0 && se.length === 0) {
+                if (activeLegendColor) {
+                    clearLegendHighlight();
+                    renderLegendPanel();
+                }
                 javaCall('vgv_notifySelectionCleared');
             }
         });
@@ -166,6 +175,10 @@
             var sn = network.getSelectedNodes();
             var se = network.getSelectedEdges();
             if (sn.length === 0 && se.length === 0) {
+                if (activeLegendColor) {
+                    clearLegendHighlight();
+                    renderLegendPanel();
+                }
                 javaCall('vgv_notifySelectionCleared');
             }
         });
@@ -351,6 +364,12 @@
             };
             return;
         }
+        // The graph is being replaced — drop any active legend highlight
+        // because the cached match-set would point at stale node ids.
+        if (activeLegendColor) {
+            activeLegendColor = null;
+            renderLegendPanel();
+        }
         if (window.__vgv_options) {
             try { network.setOptions(window.__vgv_options); } catch (e) {
                 console.error('vgv_setData: invalid options', e);
@@ -378,6 +397,10 @@
         if (network) {
             network.fit({ animation: { duration: 300, easingFunction: 'easeInOutQuad' } });
         }
+    };
+
+    window.vgv_applyLegend = function (entries, enabled) {
+        applyLegend(entries, enabled);
     };
 
     /* ----- API: layout & physics ----- */
@@ -577,6 +600,212 @@
             + 'font-family:monospace;font-size:12px;z-index:10000;';
         box.textContent = 'vis-graph-viewer: ' + message;
         container.appendChild(box);
+    }
+
+    /* ----- Legend panel ----- */
+
+    /**
+     * Public entry point called by the Java bridge (window.vgv_applyLegend).
+     * The payload is an array of {@code {colorHex, label, count}} records;
+     * {@code enabled} controls the panel's visibility.
+     */
+    function applyLegend(entriesJson, enabled) {
+        var list = [];
+        if (typeof entriesJson === 'string') {
+            try { list = JSON.parse(entriesJson) || []; }
+            catch (e) { console.warn('vgv_applyLegend: bad JSON', e); list = []; }
+        } else if (Array.isArray(entriesJson)) {
+            list = entriesJson;
+        }
+        legendEntries = list;
+        legendEnabled = !!enabled;
+        if (!legendEnabled) {
+            clearLegendHighlight();
+        }
+        renderLegendPanel();
+    }
+
+    /**
+     * Rebuild the legend DOM. The panel is positioned top-right (CSS) and
+     * hidden when {@code legendEnabled} is false OR the list is empty.
+     */
+    function renderLegendPanel() {
+        var panel = document.getElementById('vgv-legend');
+        if (!panel) return;
+        var body = panel.querySelector('.vgv-legend-body');
+        if (!body) return;
+        if (!legendEnabled || legendEntries.length === 0) {
+            panel.style.display = 'none';
+            body.innerHTML = '';
+            return;
+        }
+        var activeNorm = activeLegendColor ? normalizeColor(activeLegendColor) : null;
+        body.innerHTML = '';
+        legendEntries.forEach(function (e) {
+            if (!e || !e.colorHex) return;
+            var row = document.createElement('div');
+            row.className = 'vgv-legend-item' +
+                (activeNorm && activeNorm === normalizeColor(String(e.colorHex))
+                    ? ' vgv-legend-active' : '');
+            var swatch = document.createElement('span');
+            swatch.className = 'vgv-legend-swatch';
+            swatch.style.background = String(e.colorHex);
+            row.appendChild(swatch);
+            var labelEl = document.createElement('span');
+            labelEl.className = 'vgv-legend-label';
+            labelEl.textContent = e.label != null ? String(e.label) : '';
+            row.appendChild(labelEl);
+            if (typeof e.count === 'number') {
+                var cnt = document.createElement('span');
+                cnt.className = 'vgv-legend-count';
+                cnt.textContent = String(e.count);
+                row.appendChild(cnt);
+            }
+            row.addEventListener('click', function (ev) {
+                ev.stopPropagation();
+                toggleLegendHighlight(String(e.colorHex));
+            });
+            body.appendChild(row);
+        });
+        panel.classList.toggle('vgv-legend-collapsed', legendCollapsed);
+        var toggle = panel.querySelector('.vgv-legend-toggle');
+        if (toggle) {
+            toggle.innerHTML = legendCollapsed ? '&#x2B;' : '&#x2212;';
+            toggle.title = legendCollapsed ? 'Show legend' : 'Hide legend';
+            toggle.onclick = function (ev) {
+                ev.stopPropagation();
+                legendCollapsed = !legendCollapsed;
+                renderLegendPanel();
+            };
+        }
+        panel.style.display = 'block';
+    }
+
+    /**
+     * Toggle the highlight for the given hex color. First click activates
+     * the highlight; a second click on the same color clears it. Clicks
+     * on a different color swap the highlight.
+     */
+    function toggleLegendHighlight(hex) {
+        var norm = String(hex || '').toLowerCase();
+        if (activeLegendColor && activeLegendColor.toLowerCase() === norm) {
+            clearLegendHighlight();
+        } else {
+            applyLegendHighlight(norm);
+        }
+        renderLegendPanel();
+    }
+
+    /**
+     * Dim every node whose background color does NOT match {@code hex}, and
+     * every edge that does not connect two matching nodes. Matched nodes
+     * get a colored border. Edges between matched nodes get the same color.
+     *
+     * <p>vis-network has no stylesheet engine: each node carries its own
+     * {@code color.background} value (set by the Java bridge from the
+     * Leiden map or the tag-config map). We read it back out of the
+     * DataSet and build an {@code update} batch with the new opacity /
+     * borderWidth / color values, then call {@code nodes.update(...)} +
+     * {@code network.redraw()}.</p>
+     *
+     * <p><b>Color matching</b>: vis-network stores {@code color.background}
+     * in the same string the Java bridge wrote (typically {@code #rrggbb}
+     * or {@code rgb(r, g, b)}). We normalize both sides via
+     * {@link normalizeColor} so a click on a legend swatch always finds
+     * its target nodes regardless of the encoding.</p>
+     */
+    function applyLegendHighlight(hex) {
+        if (!network || !nodes) return;
+        clearLegendHighlight();
+        activeLegendColor = hex;
+        var target = normalizeColor(hex);
+        var all = nodes.get();
+        var matched = {};
+        all.forEach(function (n) {
+            var bg = (n.color && n.color.background) || '';
+            if (bg && normalizeColor(bg) === target) matched[n.id] = true;
+        });
+        var nodeUpdates = all.map(function (n) {
+            if (matched[n.id]) {
+                return {
+                    id: n.id,
+                    opacity: 1.0,
+                    borderWidth: 4,
+                    color: { border: hex }
+                };
+            }
+            return { id: n.id, opacity: 0.18 };
+        });
+        nodes.update(nodeUpdates);
+        // Edges: between two matched nodes -> full opacity + colored, else dim.
+        var edgeUpdates = [];
+        edges.forEach(function (e) {
+            var both = matched[e.from] && matched[e.to];
+            var upd = { id: e.id, opacity: both ? 1.0 : 0.18 };
+            if (both && e.color !== undefined) {
+                upd.color = { color: hex };
+            }
+            edgeUpdates.push(upd);
+        });
+        if (edgeUpdates.length > 0) edges.update(edgeUpdates);
+        try { network.redraw(); } catch (err) { /* ignore */ }
+    }
+
+    /**
+     * Convert any CSS color string into a canonical
+     * {@code rgb(r, g, b)} form (lowercase, no alpha). Handles
+     * {@code #rgb}, {@code #rrggbb}, {@code rgb(...)} and {@code rgba(...)}.
+     */
+    function normalizeColor(input) {
+        if (input == null) return '';
+        var s = String(input).trim().toLowerCase();
+        if (s.length === 0) return '';
+        if (s.charAt(0) === '#' && s.length === 4) {
+            var r = parseInt(s.charAt(1) + s.charAt(1), 16);
+            var g = parseInt(s.charAt(2) + s.charAt(2), 16);
+            var b = parseInt(s.charAt(3) + s.charAt(3), 16);
+            return 'rgb(' + r + ', ' + g + ', ' + b + ')';
+        }
+        if (s.charAt(0) === '#' && s.length === 7) {
+            var r1 = parseInt(s.substring(1, 3), 16);
+            var g1 = parseInt(s.substring(3, 5), 16);
+            var b1 = parseInt(s.substring(5, 7), 16);
+            return 'rgb(' + r1 + ', ' + g1 + ', ' + b1 + ')';
+        }
+        var m = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(s);
+        if (m) {
+            return 'rgb(' + m[1] + ', ' + m[2] + ', ' + m[3] + ')';
+        }
+        return s;
+    }
+
+    /**
+     * Remove every opacity / borderWidth override we added during
+     * {@link applyLegendHighlight}. The original {@code color.background}
+     * is left intact on each node because vis-network keys redraws off
+     * of property changes; setting {@code opacity} back to {@code 1.0}
+     * is enough to make the dim disappear.
+     */
+    function clearLegendHighlight() {
+        activeLegendColor = null;
+        if (!nodes) return;
+        var all = nodes.get();
+        var resets = all.map(function (n) {
+            return { id: n.id, opacity: 1.0, borderWidth: undefined };
+        });
+        // Drop entries with no id to avoid vis-network warnings.
+        resets = resets.filter(function (u) { return !!u.id; });
+        nodes.update(resets);
+        if (edges) {
+            var edgeResets = [];
+            edges.forEach(function (e) {
+                edgeResets.push({ id: e.id, opacity: 1.0 });
+            });
+            if (edgeResets.length > 0) edges.update(edgeResets);
+        }
+        if (network) {
+            try { network.redraw(); } catch (err) { /* ignore */ }
+        }
     }
 
     /* ----- bootstrap ----- */

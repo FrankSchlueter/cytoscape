@@ -8,9 +8,11 @@ import de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphData;
 import de.tk.dependencyanalyse.rapui.visgraph.data.HierarchicalDirection;
 import de.tk.dependencyanalyse.rapui.visgraph.data.LayoutAlgorithm;
+import de.tk.dependencyanalyse.rapui.visgraph.data.LegendEntry;
 import de.tk.dependencyanalyse.rapui.visgraph.data.PhysicsSolver;
 import de.tk.dependencyanalyse.rapui.visgraph.engine.GraphEngine;
 
+import java.util.List;
 import java.util.Map;
 import de.tk.dependencyanalyse.rapui.visgraph.internal.VisJsBridge;
 import org.eclipse.swt.browser.Browser;
@@ -158,6 +160,22 @@ public class GraphViewer extends Browser {
     public void setLeidenClusterColors(Map<String, String> colors) {
         if (colors == null) return;
         runWhenReady(() -> bridge.setLeidenClusterColors(colors));
+    }
+
+    /**
+     * Push the optional color legend to the iframe. {@code enabled} controls
+     * the panel's visibility — when {@code false} the panel hides but the
+     * entries are kept so toggling the dialog's checkbox restores it.
+     * {@link SwitchingViewer#setLegend} routes this call to whichever
+     * engine is currently active.
+     */
+    public void setLegend(List<LegendEntry> entries, boolean enabled) {
+        runWhenReady(() -> bridge.applyLegend(entries, enabled));
+    }
+
+    /** Remove the legend panel entirely (entries cleared + panel hidden). */
+    public void clearLegend() {
+        runWhenReady(bridge::clearLegend);
     }
 
     public void fitToScreen() {

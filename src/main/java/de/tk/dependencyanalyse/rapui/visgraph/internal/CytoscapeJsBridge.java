@@ -5,6 +5,7 @@ import de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphData;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphNode;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphRelationship;
+import de.tk.dependencyanalyse.rapui.visgraph.data.LegendEntry;
 import com.google.gson.Gson;
 import org.eclipse.swt.browser.Browser;
 
@@ -149,6 +150,24 @@ public final class CytoscapeJsBridge {
      */
     public void setLeidenColors(Map<String, String> colors) {
         exec("window.cgv_applyLeidenColors(" + gson.toJson(colors) + ");");
+    }
+
+    /**
+     * Push a legend payload to the iframe. {@code entries} is rendered as
+     * the optional click-to-highlight panel positioned top-right in the
+     * Cytoscape canvas. {@code enabled} controls panel visibility — when
+     * {@code false} the panel hides but the entries are kept so toggling
+     * the checkbox in the dialog restores the panel instantly.
+     */
+    public void applyLegend(List<LegendEntry> entries, boolean enabled) {
+        exec("window.cgv_applyLegend("
+                + gson.toJson(entries == null ? List.of() : entries)
+                + ", " + (enabled ? "true" : "false") + ");");
+    }
+
+    /** Remove the legend panel from the iframe. */
+    public void clearLegend() {
+        exec("window.cgv_applyLegend([], false);");
     }
 
     public void clear() {

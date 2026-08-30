@@ -5,6 +5,7 @@ import de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphData;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphNode;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphRelationship;
+import de.tk.dependencyanalyse.rapui.visgraph.data.LegendEntry;
 import com.google.gson.Gson;
 import org.eclipse.swt.browser.Browser;
 
@@ -95,6 +96,22 @@ public final class VisJsBridge {
      */
     public void setLeidenClusterColors(Map<String, String> colors) {
         exec("window.vgv_applyLeidenColors(" + gson.toJson(colors) + ");");
+    }
+
+    /**
+     * Push a legend payload to the iframe. {@code entries} is rendered as
+     * the optional click-to-highlight panel positioned top-right in the
+     * vis-network canvas. {@code enabled} controls panel visibility.
+     */
+    public void applyLegend(List<LegendEntry> entries, boolean enabled) {
+        exec("window.vgv_applyLegend("
+                + gson.toJson(entries == null ? List.of() : entries)
+                + ", " + (enabled ? "true" : "false") + ");");
+    }
+
+    /** Remove the legend panel from the iframe. */
+    public void clearLegend() {
+        exec("window.vgv_applyLegend([], false);");
     }
 
     public void applyData(GraphData data) {

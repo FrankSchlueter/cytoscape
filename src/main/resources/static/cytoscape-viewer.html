@@ -56,6 +56,93 @@
             border-top: 1px solid #dddddd;
             margin: 4px 0;
         }
+        /* ----- Color legend (optional) ----- */
+        #cgv-legend {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: rgba(255,255,255,0.96);
+            border: 1px solid #cccccc;
+            border-radius: 4px;
+            padding: 8px 10px;
+            font: 12px "Segoe UI", Arial, sans-serif;
+            z-index: 5000;
+            max-width: 240px;
+            max-height: 70vh;
+            overflow-y: auto;
+            box-shadow: 1px 2px 6px rgba(0,0,0,0.15);
+            display: none;
+            color: #222;
+        }
+        #cgv-legend .cgv-legend-header {
+            font-weight: 600;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #dddddd;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        #cgv-legend .cgv-legend-toggle {
+            cursor: pointer;
+            color: #888;
+            font-weight: normal;
+            padding: 0 4px;
+            user-select: none;
+        }
+        #cgv-legend .cgv-legend-toggle:hover {
+            color: #333;
+        }
+        #cgv-legend .cgv-legend-body {
+            display: block;
+        }
+        #cgv-legend.cgv-legend-collapsed .cgv-legend-body {
+            display: none;
+        }
+        #cgv-legend .cgv-legend-item {
+            display: flex;
+            align-items: center;
+            padding: 3px 4px;
+            cursor: pointer;
+            border-radius: 3px;
+            user-select: none;
+        }
+        #cgv-legend .cgv-legend-item:hover {
+            background: #f0f0f0;
+        }
+        #cgv-legend .cgv-legend-item.cgv-legend-active {
+            background: #fff3cd;
+            font-weight: 600;
+        }
+        #cgv-legend .cgv-legend-swatch {
+            width: 14px;
+            height: 14px;
+            border: 1px solid #333;
+            border-radius: 2px;
+            margin-right: 6px;
+            flex-shrink: 0;
+        }
+        #cgv-legend .cgv-legend-label {
+            flex: 1;
+            word-break: break-word;
+        }
+        #cgv-legend .cgv-legend-count {
+            color: #777;
+            font-size: 11px;
+            margin-left: 6px;
+        }
+        #cgv-legend .cgv-legend-empty {
+            color: #999;
+            font-style: italic;
+            padding: 4px 0;
+        }
+        #cgv-legend .cgv-legend-hint {
+            color: #666;
+            font-size: 11px;
+            padding-top: 4px;
+            border-top: 1px solid #eee;
+            margin-top: 4px;
+        }
     </style>
     <!--
       cytoscape + layout-base + cose-base + fcose are concatenated into
@@ -75,6 +162,14 @@
 <div id="cy"></div>
 <div id="error"></div>
 <div id="cgv-context-menu"></div>
+<div id="cgv-legend" aria-label="Color legend">
+    <div class="cgv-legend-header">
+        <span>Legend</span>
+        <span class="cgv-legend-toggle" title="Hide legend">&#x2212;</span>
+    </div>
+    <div class="cgv-legend-body"></div>
+    <div class="cgv-legend-hint" style="display:none"></div>
+</div>
 
 <script src="/cytoscape/cytoscape-viewer.js"></script>
 </body>

@@ -31,6 +31,11 @@
     var cyReady = false;
     var leidenColors = null;
     var resizeObserved = false;
+    // Legend state
+    var legendEntries = [];
+    var legendEnabled = false;
+    var activeLegendColor = null;
+    var legendCollapsed = false;
 
     /**
      * Call a BrowserFunction on the iframe's contentWindow. BrowserFunctions
@@ -484,6 +489,12 @@
             pendingElements = elements;
             return;
         }
+        // Drop any active legend highlight — the underlying nodes and
+        // their styles are about to be replaced by cy.add().
+        if (activeLegendColor) {
+            activeLegendColor = null;
+            renderLegendPanel();
+        }
         try {
             cy.batch(function () {
                 cy.elements().remove();
@@ -722,13 +733,17 @@
                 highlightEdgeNeighborhood(cy, edge);
             }
         });
-        // Click on background clears the selection + dimming.
+        // Click on background clears the selection + dimming + legend highlight.
         cy.on('tap', function (evt) {
             if (evt.target === cy) {
                 var sel = cy.elements(':selected');
                 if (sel.length > 0) sel.unselect();
                 javaCall('cgv_notifySelectionCleared');
                 clearNeighborhoodHighlight(cy);
+                if (activeLegendColor) {
+                    clearLegendHighlight();
+                    renderLegendPanel();
+                }
             }
         });
 
@@ -785,6 +800,206 @@
         });
         // Re-apply the default stylesheet so the :selected selectors
         // continue to work for the next selection.
+        cy.style().update();
+    }
+
+    /* ---- Legend panel ---- */
+
+    /**
+     * Public entry point called by the Java bridge (window.cgv_applyLegend).
+     * The payload is a JSON-encoded array of {@code {colorHex, label, count}}
+     * records; {@code enabled} controls the panel's visibility.
+     */
+    function applyLegend(entriesJson, enabled) {
+        var list = [];
+        if (typeof entriesJson === 'string') {
+            try { list = JSON.parse(entriesJson) || []; }
+            catch (e) { console.warn('cgv_applyLegend: bad JSON', e); list = []; }
+        } else if (Array.isArray(entriesJson)) {
+            list = entriesJson;
+        }
+        legendEntries = list;
+        legendEnabled = !!enabled;
+        // If the legend was disabled, drop any active highlight.
+        if (!legendEnabled) {
+            clearLegendHighlight();
+        }
+        renderLegendPanel();
+    }
+
+    /**
+     * Rebuild the legend DOM. The panel is positioned top-right (CSS) and
+     * hidden when {@code legendEnabled} is false OR the list is empty.
+     */
+    function renderLegendPanel() {
+        var panel = document.getElementById('cgv-legend');
+        if (!panel) return;
+        var body = panel.querySelector('.cgv-legend-body');
+        if (!body) return;
+        if (!legendEnabled || legendEntries.length === 0) {
+            panel.style.display = 'none';
+            body.innerHTML = '';
+            return;
+        }
+        var activeNorm = activeLegendColor ? normalizeColor(activeLegendColor) : null;
+        body.innerHTML = '';
+        legendEntries.forEach(function (e) {
+            if (!e || !e.colorHex) return;
+            var row = document.createElement('div');
+            row.className = 'cgv-legend-item' +
+                (activeNorm && activeNorm === normalizeColor(String(e.colorHex))
+                    ? ' cgv-legend-active' : '');
+            var swatch = document.createElement('span');
+            swatch.className = 'cgv-legend-swatch';
+            swatch.style.background = String(e.colorHex);
+            row.appendChild(swatch);
+            var labelEl = document.createElement('span');
+            labelEl.className = 'cgv-legend-label';
+            labelEl.textContent = e.label != null ? String(e.label) : '';
+            row.appendChild(labelEl);
+            if (typeof e.count === 'number') {
+                var cnt = document.createElement('span');
+                cnt.className = 'cgv-legend-count';
+                cnt.textContent = String(e.count);
+                row.appendChild(cnt);
+            }
+            row.addEventListener('click', function (ev) {
+                ev.stopPropagation();
+                toggleLegendHighlight(String(e.colorHex));
+            });
+            body.appendChild(row);
+        });
+        panel.classList.toggle('cgv-legend-collapsed', legendCollapsed);
+        var toggle = panel.querySelector('.cgv-legend-toggle');
+        if (toggle) {
+            toggle.innerHTML = legendCollapsed ? '&#x2B;' : '&#x2212;';
+            toggle.title = legendCollapsed ? 'Show legend' : 'Hide legend';
+            toggle.onclick = function (ev) {
+                ev.stopPropagation();
+                legendCollapsed = !legendCollapsed;
+                renderLegendPanel();
+            };
+        }
+        panel.style.display = 'block';
+    }
+
+    /**
+     * Toggle the highlight for the given hex color. First click activates
+     * the highlight; a second click on the same color clears it. Clicks
+     * on a different color swap the highlight.
+     */
+    function toggleLegendHighlight(hex) {
+        var norm = String(hex || '').toLowerCase();
+        if (activeLegendColor && activeLegendColor.toLowerCase() === norm) {
+            clearLegendHighlight();
+        } else {
+            applyLegendHighlight(norm);
+        }
+        renderLegendPanel();
+    }
+
+    /**
+     * Dim every node whose background color does NOT match {@code hex}, and
+     * every edge that does not connect two matching nodes. Matched nodes
+     * get a colored border so the user can see which cluster they're
+     * hovering. Edges between matched nodes get the same color so they
+     * stay visible too.
+     *
+     * <p><b>Color matching</b>: Cytoscape's {@code n.style('background-color')}
+     * returns its internal representation — either {@code #rrggbb},
+     * {@code rgb(r, g, b)}, or {@code rgba(r, g, b, a)} — depending on how
+     * the stylesheet was authored. The legend payload comes from Java in
+     * {@code #RRGGBB} form. We normalize both sides to a canonical
+     * {@code rgb(r, g, b)} string before comparing so a match always
+     * works regardless of the source encoding.</p>
+     */
+    function applyLegendHighlight(hex) {
+        if (!cy) return;
+        clearLegendHighlight();
+        activeLegendColor = hex;
+        var targetRgb = normalizeColor(hex);
+        var nodes = cy.nodes();
+        var matched = nodes.filter(function (n) {
+            var bg = n.style('background-color');
+            return bg && normalizeColor(bg) === targetRgb;
+        });
+        var matchedSet = {};
+        matched.forEach(function (n) { matchedSet[n.id()] = true; });
+        cy.batch(function () {
+            nodes.forEach(function (n) {
+                if (matchedSet[n.id()]) {
+                    n.style({
+                        'border-width': 4,
+                        'border-color': hex,
+                        'border-style': 'solid'
+                    });
+                } else {
+                    n.style({ 'opacity': 0.18 });
+                }
+            });
+            cy.edges().forEach(function (e) {
+                var sId = e.source().id();
+                var tId = e.target().id();
+                if (matchedSet[sId] && matchedSet[tId]) {
+                    e.style({
+                        'line-color': hex,
+                        'target-arrow-color': hex,
+                        'opacity': 1
+                    });
+                } else {
+                    e.style({ 'opacity': 0.18 });
+                }
+            });
+        });
+    }
+
+    /**
+     * Convert any CSS color string Cytoscape hands us into a canonical
+     * {@code rgb(r, g, b)} form (lowercase, no alpha). Handles
+     * {@code #rgb}, {@code #rrggbb}, {@code rgb(...)} and {@code rgba(...)}.
+     * Unknown inputs (named colors, transparent) round-trip to themselves
+     * so equality with another unknown input still works.
+     */
+    function normalizeColor(input) {
+        if (input == null) return '';
+        var s = String(input).trim().toLowerCase();
+        if (s.length === 0) return '';
+        // #rgb short form
+        if (s.charAt(0) === '#' && s.length === 4) {
+            var r = parseInt(s.charAt(1) + s.charAt(1), 16);
+            var g = parseInt(s.charAt(2) + s.charAt(2), 16);
+            var b = parseInt(s.charAt(3) + s.charAt(3), 16);
+            return 'rgb(' + r + ', ' + g + ', ' + b + ')';
+        }
+        // #rrggbb form
+        if (s.charAt(0) === '#' && s.length === 7) {
+            var r1 = parseInt(s.substring(1, 3), 16);
+            var g1 = parseInt(s.substring(3, 5), 16);
+            var b1 = parseInt(s.substring(5, 7), 16);
+            return 'rgb(' + r1 + ', ' + g1 + ', ' + b1 + ')';
+        }
+        // rgb(r, g, b) or rgba(r, g, b, a)
+        var m = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(s);
+        if (m) {
+            return 'rgb(' + m[1] + ', ' + m[2] + ', ' + m[3] + ')';
+        }
+        // Named / unknown — return as-is so two same-name colors match.
+        return s;
+    }
+
+    /**
+     * Remove every inline opacity / border / line-color override we added
+     * during {@link applyLegendHighlight}. The stylesheet's node:selected /
+     * edge:selected rules are preserved by re-applying the stylesheet.
+     */
+    function clearLegendHighlight() {
+        activeLegendColor = null;
+        if (!cy) return;
+        cy.batch(function () {
+            cy.elements().removeStyle(
+                'opacity border-width border-color border-style line-color target-arrow-color'
+            );
+        });
         cy.style().update();
     }
 
@@ -1242,6 +1457,10 @@
         if (cyReady && cy) {
             cy.fit(undefined, 30);
         }
+    };
+
+    window.cgv_applyLegend = function (entries, enabled) {
+        applyLegend(entries, enabled);
     };
 
     /* ---- context menu rendering ---- */

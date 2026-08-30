@@ -59,6 +59,25 @@ Am unteren Bildschirmrand:
    Web-Worker `cytoscape-leiden-worker.js` als alternative Browser-Lösung)
    und färbt die Nodes nach Community-Zugehörigkeit ein.
 
+4. **Legend (optional)** — Checkbox `Enable Legend` plus Combo `Source`
+   (`Combined`, `Tag Values`, `Leiden Clusters`, `Node Types`). Das Panel
+   erscheint oben rechts im Viewer (vis & cytoscape) und erklärt jede
+   Farbe. Bei `Source = Leiden Clusters` werden Communities nach Größe
+   absteigend nummeriert (`Cluster1` = größtes Cluster, `Cluster2` = …).
+   Bei `Source = Combined` werden Tag-Farben vor Cluster-Farben vor
+   Node-Type-Farben priorisiert; identische Hex-Werte werden
+   zusammengeführt, sodass jede Farbe nur einmal erscheint.
+
+   **Click-to-Highlight**: ein Klick auf einen Legendeneintrag dimmt alle
+   Nodes, die diese Farbe *nicht* tragen (`opacity: 0.18`) und rahmt
+   die Treffer mit einem farbigen Border ein. Edges zwischen zwei
+   getroffenen Nodes bleiben in derselben Farbe sichtbar; alle anderen
+   Edges werden gedimmt. Ein zweiter Klick auf dieselbe Farbe (oder ein
+   Klick auf den leeren Hintergrund des Viewers) hebt das Highlight
+   wieder auf. Implementiert in `LegendBuilder.java` /
+   `data/LegendEntry.java` (Java) und `cgv_applyLegend` /
+   `vgv_applyLegend` (JS-Bridges).
+
 ## Beispielgraph
 
 Datei `export (4).csv` liegt sowohl im Root des Projekts als auch unter
