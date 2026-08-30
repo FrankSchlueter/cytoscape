@@ -163,7 +163,7 @@
             cy = cytoscape({
                 container: container,
                 elements: [],
-                style: defaultStyle(),
+                style: defaultStyle().concat([imageNodeStyle()]),
                 layout: { name: 'preset' },
                 wheelSensitivity: 0.2,
                 minZoom: 0.1,
@@ -262,6 +262,54 @@
     }
 
     /**
+     * Style rule for nodes whose {@code data.image} is set (SVG badge nodes
+     * produced by {@code GraphNode.setSvgShape} / {@code setSvgIcon} /
+     * {@code setIcon}).
+     *
+     * <p>Cytoscape renders the SVG data URI as a {@code background-image}
+     * clipped to the node's shape, so the underlying rounded-rect background
+     * (provided by the SVG itself — the Leiden community color or whatever
+     * the Java caller baked into {@code renderSvgIcon3}) is what the user
+     * actually sees. We pick a neutral Cytoscape fill so the canvas does not
+     * double-paint behind the SVG, and suppress Cytoscape's native label
+     * because the label is already drawn inside the SVG.</p>
+     *
+     * <p>Must be appended AFTER {@link #defaultStyle()} so it overrides the
+     * generic {@code node} rule; the {@code node:selected} rule from
+     * {@code defaultStyle()} continues to win for selection because it is
+     * appended last in {@code defaultStyle()} (Cytoscape applies the LAST
+     * matching rule).</p>
+     */
+    function imageNodeStyle() {
+        return { selector: 'node[?image]',
+            style: {
+                'shape': 'round-rectangle',
+                'background-image': 'data(image)',
+                'background-clip': 'node',
+                'background-fit': 'contain',
+                'background-width': '100%',
+                'background-height': '100%',
+                'background-image-opacity': 1,
+                'background-color': '#ffffff',
+                'corner-radius': '6px',
+                'width': 40,
+                'height': 31,
+                // Min size floor: keeps the embedded icon + type-label
+                // legible even when the underlying SVG body is narrower
+                // than the canvas expects. Cytoscape's renderer uses the
+                // max(width, min-width) for layout collision detection,
+                // so this also prevents adjacent badges from crowding
+                // each other in dense regions of the graph.
+                'min-width': 50,
+                'min-height': 31,
+                'border-width': 1,
+                'border-color': '#222222',
+                'label': '',
+                'text-events': 'no'
+            }};
+    }
+
+    /**
      * Pre-position nodes based on their Leiden community color. Each
      * community gets a 2-D grid slot of the canvas; nodes inside the
      * same community are placed in a small ring within that slot. fcose
@@ -316,6 +364,120 @@
         return true;
     }
 
+    /**
+     * Preload every node's {@code data.image} (a data:image/svg+xml URI) into
+     * a browser Image object, then force Cytoscape to redraw once the load
+     * events fire.
+     *
+     * <p>Background: Cytoscape's renderer only paints
+     * {@code background-image} when the underlying Image object is
+     * {@code complete}. If the first draw happens before the browser has
+     * finished parsing the SVG data URI, the layer cache is populated
+     * without the image and the badge stays invisible. The auto-refinement
+     * path Cytoscape usually relies on (the {@code backgroundTimestamp}
+     * listener registered inside {@code getCachedImage}) is brittle when
+     * the layer cache has already committed a frame, so we take the direct
+     * route: preload every URI, wait for all of them, then redraw.</p>
+     *
+     * <p>This is a no-op when no nodes carry {@code data.image}.</p>
+     */
+    function preloadSvgImagesAndRedraw() {
+        if (!cy) return;
+        var uris = [];
+        cy.nodes().forEach(function (n) {
+            var img = n.data('image');
+            if (typeof img === 'string' && img.length > 0 &&
+                img.toLowerCase().indexOf('data:image/') === 0) {
+                uris.push(img);
+            }
+        });
+        // Always fire cy.resize() so the canvas matches the container and
+        // the layout engine computes its final positions against the real
+        // viewport. Without this, plain-node graphs (no data URIs to
+        // preload) skip the resize entirely and Edges never get a final
+        // paint pass.
+        function fireResize() {
+            try { cy.resize(); } catch (e) { /* ignore */ }
+        }
+        // Run the layout + fit ONCE all images have loaded (or
+        // immediately if there are no images). This is the single source
+        // of truth for the post-load paint pass — applyElements no longer
+        // runs the layout synchronously to avoid the race where Edges are
+        // computed against the default 40×40 bounding boxes BEFORE the
+        // SVG data URIs have finished parsing.
+        function runPostLoadLayout() {
+            try {
+                var preseed = leidenColors && preseedCommunityPositions(leidenColors);
+                if (preseed) {
+                    log('postLoad: community preset applied, kicking off fcose async');
+                } else {
+                    log('postLoad: no community map, falling back to circle preset');
+                    cy.nodes().forEach(function (n, i) {
+                        var angle = (i / cy.nodes().length) * Math.PI * 2;
+                        n.position({
+                            x: cy.width() / 2 + Math.cos(angle) * Math.min(cy.width(), cy.height()) * 0.35,
+                            y: cy.height() / 2 + Math.sin(angle) * Math.min(cy.width(), cy.height()) * 0.35,
+                        });
+                    });
+                }
+                cy.layout({ name: 'preset', animate: false, fit: false }).run();
+                var mappedLayout = mapLayoutName(currentLayout);
+                if (mappedLayout !== 'preset') {
+                    setTimeout(function () {
+                        runLayout(currentLayout, pendingLayoutOptions);
+                    }, 50);
+                } else {
+                    try {
+                        var nodes = cy.nodes();
+                        if (nodes.length > 0) {
+                            var bb = { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity };
+                            nodes.forEach(function (n) {
+                                var p = n.position();
+                                if (p.x - 30 < bb.x1) bb.x1 = p.x - 30;
+                                if (p.y - 30 < bb.y1) bb.y1 = p.y - 30;
+                                if (p.x + 30 > bb.x2) bb.x2 = p.x + 30;
+                                if (p.y + 30 > bb.y2) bb.y2 = p.y + 30;
+                            });
+                            cy.fit(undefined, 30);
+                            log('postLoad: nodes-only fit complete; spread=' +
+                                Math.round(bb.x2 - bb.x1) + 'x' + Math.round(bb.y2 - bb.y1));
+                        } else {
+                            cy.fit(undefined, 30);
+                        }
+                    } catch (e) { /* ignore */ }
+                }
+            } catch (e) {
+                log('postLoad: preset failed, running fcose directly: ' + e.message);
+                runLayout(currentLayout, pendingLayoutOptions);
+            }
+        }
+        if (uris.length === 0) {
+            fireResize();
+            runPostLoadLayout();
+            return;
+        }
+        var pending = uris.length;
+        var fired = false;
+        uris.forEach(function (uri) {
+            var im = new Image();
+            im.onload = im.onerror = function () {
+                pending--;
+                if (pending <= 0 && !fired) {
+                    fired = true;
+                    // Force every image-badge node to re-render now that
+                    // the SVG has finished parsing. emit('background') is
+                    // the same signal Cytoscape's own image-loader uses.
+                    cy.nodes().forEach(function (n) {
+                        if (n.data('image')) n.emit('background');
+                    });
+                    fireResize();
+                    runPostLoadLayout();
+                }
+            };
+            im.src = uri;
+        });
+    }
+
     function applyElements(elements) {
         if (!cyReady || !cy) {
             log('applyElements: not ready, queueing ' + (elements ? elements.length : 0) + ' elements');
@@ -337,64 +499,23 @@
             return;
         }
         javaCall('cgv_viewerReady');
-        // Force-resize so fcose computes against the real container size.
-        try { cy.resize(); } catch (e) { /* ignore */ }
-        // Pre-position nodes based on Leiden community grid if a color
-        // map is available. fcose then runs with randomize=false so it
-        // preserves the community grid and only fine-tunes with spring +
-        // repulsion forces. The inter-community spacing comes from the
-        // initial preseed positions; high-weight intra-community edges
-        // pull their endpoints closer.
-        var preseed = leidenColors && preseedCommunityPositions(leidenColors);
-        if (preseed) {
-            log('applyElements: community preset applied, kicking off fcose async');
-        } else {
-            log('applyElements: no community map, falling back to circle preset');
-            cy.nodes().forEach(function (n, i) {
-                var angle = (i / cy.nodes().length) * Math.PI * 2;
-                n.position({
-                    x: cy.width() / 2 + Math.cos(angle) * Math.min(cy.width(), cy.height()) * 0.35,
-                    y: cy.height() / 2 + Math.sin(angle) * Math.min(cy.width(), cy.height()) * 0.35,
-                });
-            });
-        }
-        try {
-            cy.layout({ name: 'preset', animate: false, fit: false }).run();
-            // The user-selected layout (e.g. fcose) re-runs over the
-            // pre-seeded positions. For the default 'preset' layout we
-            // already applied it, so just fit and stop.
-            var mappedLayout = mapLayoutName(currentLayout);
-            if (mappedLayout !== 'preset') {
-                setTimeout(function () {
-                    runLayout(currentLayout, pendingLayoutOptions);
-                }, 50);
-            } else {
-                // Fit based on nodes only — edge-spanning bounding
-                // boxes stretch the viewport and compress the Leiden
-                // grid into a single blob.
-                try {
-                    var nodes = cy.nodes();
-                    if (nodes.length > 0) {
-                        var bb = { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity };
-                        nodes.forEach(function (n) {
-                            var p = n.position();
-                            if (p.x - 30 < bb.x1) bb.x1 = p.x - 30;
-                            if (p.y - 30 < bb.y1) bb.y1 = p.y - 30;
-                            if (p.x + 30 > bb.x2) bb.x2 = p.x + 30;
-                            if (p.y + 30 > bb.y2) bb.y2 = p.y + 30;
-                        });
-                        cy.fit(undefined, 30);
-                        log('applyElements: nodes-only fit complete; spread=' +
-                            Math.round(bb.x2 - bb.x1) + 'x' + Math.round(bb.y2 - bb.y1));
-                    } else {
-                        cy.fit(undefined, 30);
-                    }
-                } catch (e) { /* ignore */ }
-            }
-        } catch (e) {
-            log('preset failed, running fcose directly: ' + e.message);
-            runLayout(currentLayout, pendingLayoutOptions);
-        }
+        // Cytoscape's drawNode only paints background-image when the
+        // underlying Image object reports complete=true (cytoscape.min.js,
+        // Uu.drawNode → J()). If we draw before the SVG data URI finishes
+        // parsing in the browser, the texture-cache layer is populated
+        // WITHOUT the image and Cytoscape's auto-refinement path does NOT
+        // reliably re-run — the badge then stays invisible. Worse: edges
+        // are positioned using node-bounding-boxes, which are still the
+        // pre-image defaults (40×40) until the image has loaded. Running
+        // the layout NOW would paint edges against wrong anchor points
+        // and the user would see "edges disappear" after the first resize
+        // reflow. We therefore preload every node's image, then run the
+        // layout AND fit ONCE so that everything is computed against the
+        // final image dimensions.
+        preloadSvgImagesAndRedraw();
+        // pre-position + layout run is initiated from
+        // preloadSvgImagesAndRedraw's resize callback (where the images
+        // are guaranteed loaded) so we do not double-render here.
     }
 
     function runLayout(name, options) {
@@ -422,7 +543,11 @@
             // so fcose actually spreads the nodes out. The previous
             // nodeRepulsion=50 collapsed the graph into a dense blob
             // because the spring forces overwhelmed the repulsion.
-            if (typeof layoutOpts.nodeRepulsion !== 'number') layoutOpts.nodeRepulsion = 12000;
+            // nodeRepulsion=18000 keeps adjacent nodes safely separated
+            // even when their bounding box grows via min-width on SVG
+            // badges (the layout engine uses max(width, min-width) for
+            // collision detection).
+            if (typeof layoutOpts.nodeRepulsion !== 'number') layoutOpts.nodeRepulsion = 18000;
             if (typeof layoutOpts.gravity !== 'number') layoutOpts.gravity = 0.05;
             if (typeof layoutOpts.edgeElasticity !== 'number') layoutOpts.edgeElasticity = 0.45;
         } else if (layoutName === 'cola') {
@@ -539,6 +664,25 @@
     }
 
     function wireCytoscapeEvents(cy) {
+        // Hover highlight for SVG image-badge nodes (data.image set). Cytoscape
+        // has no :hover pseudo-class in its style selectors, so we apply an
+        // inline style override on mouseover and clear it on mouseout. We do
+        // NOT touch grabbed/selected nodes — the red selection border wins.
+        cy.on('mouseover', 'node[?image]', function (evt) {
+            var n = evt.target;
+            if (!n || n.grabbed() || n.selected()) return;
+            n.style({
+                'border-color': '#4A90E2',
+                'border-width': 3
+            });
+        });
+        cy.on('mouseout', 'node[?image]', function (evt) {
+            var n = evt.target;
+            if (!n) return;
+            // Removing the inline overrides lets the stylesheet rule
+            // (imageNodeStyle / node:selected) reassert itself.
+            n.removeStyle('border-color border-width');
+        });
         // Tap on a node:
         //   - if the node is already selected, deselect it (toggle)
         //   - if a different node is selected, switch the selection
@@ -720,9 +864,17 @@
                             // Re-include defaultStyle() so the
                             // node:selected / edge:selected selectors
                             // survive the stylesheet replacement.
+                            // Append imageNodeStyle() AFTER the Leiden
+                            // overrides so image-badges win back their
+                            // SVG rendering (Cytoscape applies the LAST
+                            // matching rule).
                             var defaults = defaultStyle();
-                            var merged = defaults.concat(styles);
+                            var merged = defaults.concat(styles).concat([imageNodeStyle()]);
                             cy.style().fromJson(merged).update();
+                            // Rebuild texture cache so SVG badges paint
+                            // with the (possibly new) Leiden background
+                            // color after the stylesheet swap.
+                            preloadSvgImagesAndRedraw();
                         }
                         log('autoLoadFallback: applied ' + styles.length + ' Leiden colors');
                     } catch (e) { console.warn('leiden color apply failed', e); }
@@ -758,7 +910,61 @@
     window.cgv_applyNodeConfig = function (config) {
         if (!cyReady || !cy) return;
         var style = buildStyleFromConfig(config || {});
+        // Append imageNodeStyle() AFTER user-config overrides so image-badge
+        // nodes always render their SVG (Cytoscape applies the LAST matching
+        // style selector).
+        style.push(imageNodeStyle());
         cy.style().fromJson(style).update();
+        // Re-preload SVG badges — replacing the stylesheet rebuilds the
+        // texture cache so any image that hadn't finished parsing is
+        // gone from the cached Image() map.
+        preloadSvgImagesAndRedraw();
+    };
+
+    /**
+     * Swap the {@code data.image} attribute on a batch of nodes and
+     * trigger a redraw so Cytoscape picks up the new sprite without a
+     * full data reload. Called by the Java bridge whenever a
+     * {@link NodeConfig} color override re-renders one or more SVG
+     * badges (the new color is BAKED INTO the SVG body, so Cytoscape's
+     * stylesheet {@code background-color} cannot change it — the only
+     * way to recolor a badge is to swap the image URI).
+     *
+     * <p>{@code updates} is an array of {@code {id, image}} objects. The
+     * bridge pre-loads each URI and waits for all loads to fire before
+     * emitting {@code 'background'} on the touched nodes, mirroring the
+     * preload-then-redraw fix used by {@code applyElements}.</p>
+     */
+    window.cgv_applyNodeImages = function (updates) {
+        if (!cyReady || !cy || !updates || updates.length === 0) return;
+        var uris = [];
+        var touched = [];
+        updates.forEach(function (u) {
+            if (!u || !u.id || typeof u.image !== 'string' || u.image.length === 0) return;
+            var n = cy.getElementById(u.id);
+            if (n.length === 0) return;
+            n.data('image', u.image);
+            uris.push(u.image);
+            touched.push(n);
+        });
+        if (uris.length === 0) return;
+        log('cgv_applyNodeImages: swapping ' + uris.length + ' image(s)');
+        // Preload each new URI so the texture cache repaints with the
+        // freshly-parsed sprite instead of the cached empty placeholder.
+        var pending = uris.length;
+        var fired = false;
+        uris.forEach(function (uri) {
+            var im = new Image();
+            im.onload = im.onerror = function () {
+                pending--;
+                if (pending <= 0 && !fired) {
+                    fired = true;
+                    touched.forEach(function (n) { n.emit('background'); });
+                    try { cy.resize(); } catch (e) { /* ignore */ }
+                }
+            };
+            im.src = uri;
+        });
     };
 
     /**
@@ -1016,8 +1222,13 @@
             // Only add defaults that aren't already in the new styles.
             // Cytoscape applies the LAST matching style, so the Leiden
             // colors need to come AFTER the defaults in the array.
-            var merged = defaults.concat(styles);
+            // imageNodeStyle() comes LAST so image-badge nodes still
+            // render their SVG even when Leiden set background-color.
+            var merged = defaults.concat(styles).concat([imageNodeStyle()]);
             cy.style().fromJson(merged).update();
+            // Rebuild the texture cache for SVG badges — see
+            // preloadSvgImagesAndRedraw in applyElements for the rationale.
+            preloadSvgImagesAndRedraw();
         }
     };
 

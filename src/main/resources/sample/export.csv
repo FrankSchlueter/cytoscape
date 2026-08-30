@@ -84,7 +84,7 @@ DA Zahnaerzte / Behandlungsfallnachweis,Sozialhilfetraeger,83
 Sonstige Leistungen,Sozialhilfetraeger,33
 Haertefall - Belastungsgrenze,Sozialhilfetraeger,66
 Versichertenbestandsfuehrung,Sozialhilfetraeger,125
-"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Sozialhilfetraeger,2
+TKeasy-Rechnungswesen,Sozialhilfetraeger,2
 Krankenhausaufenthalt,Sozialhilfetraeger,99
 Mitteilungsmanagement,Sozialhilfetraeger,2
 DA Sonstige Leistungserbringer,Sozialhilfetraeger,30
@@ -111,7 +111,7 @@ Kieferorthopaedie,Kur,5
 Fahrkosten,Kur,55
 Entgeltersatzleistungen,Kur,59
 Zahnersatz,Kur,53
-"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Kur,2
+TKeasy-Rechnungswesen,Kur,2
 Haertefall - Belastungsgrenze,Kur,6
 Professionelle Zahnreinigung,Kur,1
 DA Entgeltersatzleistungen,Kur,81
@@ -196,7 +196,7 @@ Haeusliche Krankenpflege,Hilfsmittel,27
 DA Sonstige Leistungserbringer,Hilfsmittel,47
 Leistungsuebersicht,Hilfsmittel,39
 CRM,Hilfsmittel,12
-"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Hilfsmittel,57
+TKeasy-Rechnungswesen,Hilfsmittel,57
 MeineTK,Hilfsmittel,34
 Leistungen-Basis,Hilfsmittel,14
 KI-Basis,Hilfsmittel,9
@@ -231,7 +231,7 @@ Psychotherapie,Gutachter-Verzeichnis,338
 Sonstige Leistungen,Gutachter-Verzeichnis,107
 Behandler-Verzeichnis,Gutachter-Verzeichnis,55
 Kiss24-TKeasy,Gutachter-Verzeichnis,9
-"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Gutachter-Verzeichnis,0
+TKeasy-Rechnungswesen,Gutachter-Verzeichnis,0
 Zahnersatz,Gutachter-Verzeichnis,277
 Kieferorthopaedie,Gutachter-Verzeichnis,123
 Leistungen-Basis,Gutachter-Verzeichnis,104
@@ -311,7 +311,7 @@ MeineTK,Vorgangstracking,287
 Geschaeftsprozess,Vorgangstracking,34
 Mutterschaftsgeld (MUG),Vorgangstracking,19
 Pflegeversicherung,Vorgangstracking,19
-"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Vorgangstracking,15
+TKeasy-Rechnungswesen,Vorgangstracking,15
 CRM,Vorgangstracking,8
 Optimization,Zusatztarif / Zusatzversicherung,1
 Pflegeversicherung,Zusatztarif / Zusatzversicherung,3
@@ -547,7 +547,7 @@ Haertefall - Belastungsgrenze,Elektronischer Austausch von Sozialversicherungsda
 Sonstige Leistungen,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),35
 Krankenhausaufenthalt,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),194
 DA Apotheken,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),26
-"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Elektronischer Austausch von Sozialversicherungsdaten (EESSI),2
+TKeasy-Rechnungswesen,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),2
 Entsendung,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),368
 DA Integrierte Versorgung,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),26
 Kur,Elektronischer Austausch von Sozialversicherungsdaten (EESSI),38
@@ -589,7 +589,7 @@ Leistungsaushilfe Ausland,Unfall,1
 Krankenhausaufenthalt,Unfall,39
 MeineTK,Unfall,68
 DA Apotheken,Unfall,47
-"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Unfall,2
+TKeasy-Rechnungswesen,Unfall,2
 CRM,Unfall,5
 Leistungen-Basis,Unfall,39
 DA Sonstige Leistungserbringer,Unfall,48
@@ -681,7 +681,7 @@ Widerspruchsbearbeitung,Pflegeversicherung,29
 Fahrkosten,Pflegeversicherung,132
 MeineTK,Pflegeversicherung,991
 Versichertenbestandsfuehrung,Pflegeversicherung,1
-"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Pflegeversicherung,2
+TKeasy-Rechnungswesen,Pflegeversicherung,2
 Fusionsarchiv,Pflegeversicherung,15
 KI-Basis,Pflegeversicherung,11
 Kiss24-TKeasy,Pflegeversicherung,9
@@ -731,7 +731,7 @@ Hilfsmittel,Heilmittelverzeichnis,8
 Kur,Heilmittelverzeichnis,54
 Kostenerstattung,Heilmittelverzeichnis,360
 DA Beitragsdifferenzierung PV,Datenschutzcockpit,84
-"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Gesundheitsprojekte,5
+TKeasy-Rechnungswesen,Gesundheitsprojekte,5
 Vertriebsmanagement,Gesundheitsprojekte,154
 Dokumentenarchiv und Dokumentenaufnahme,Gesundheitsprojekte,6
 UI-Components,Gesundheitsprojekte,41
@@ -746,7 +746,7 @@ Vertriebsmanagement,Arbeitgeberbeitrag,12
 Fusionsarchiv,Arbeitgeberbeitrag,37
 Insolvenzmanagement,Arbeitgeberbeitrag,2390
 TK-Konto (TKeasy-GUI  Schriftgut),Arbeitgeberbeitrag,75
-"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Arbeitgeberbeitrag,33
+TKeasy-Rechnungswesen,Arbeitgeberbeitrag,33
 Integrationstests,Arbeitgeberbeitrag,24
 Mutterschaftsgeld (MUG),Arbeitgeberbeitrag,1
 Arbeitgeberbeitrag,Insolvenzmanagement,64
@@ -780,7 +780,7 @@ Arbeitgeberbeitrag,Vollstreckung,1055
 Versichertenbestandsfuehrung,Vollstreckung,20
 Vertriebsmanagement,Vollstreckung,2
 TK-Konto (TKeasy-GUI  Schriftgut),Vollstreckung,921
-"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Vollstreckung,433
+TKeasy-Rechnungswesen,Vollstreckung,433
 Kiss24-TKeasy,Vollstreckung,5
 Gebietsabgrenzung (GBA),Vollstreckung,15
 MeineTK,TK-Vorsorgeplaner,14
@@ -850,7 +850,7 @@ Mutterschaftsgeld (MUG),Sonstige Leistungen,3
 Pruefung der Leistungspflicht - PLP,Sonstige Leistungen,70
 Versichertenbestandsfuehrung,Sonstige Leistungen,2
 Generische Kostenerstattung,Sonstige Leistungen,42
-"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Sonstige Leistungen,7
+TKeasy-Rechnungswesen,Sonstige Leistungen,7
 LM-Fallfuehrung,Sonstige Leistungen,18
 Kinderkrankengeld (KKG),Sonstige Leistungen,31
 Leistungsuebersicht,Sonstige Leistungen,190
@@ -991,7 +991,7 @@ CRM-Akquisemanager,Adress-Service,68
 SozV-Meldungen,Adress-Service,19
 Behandler-Verzeichnis,Adress-Service,51
 Gesundheitskarte (eGK),Adress-Service,14
-"TKeasy-Rechnungswesen (Vorbeleg, GP-Konto, Forderungsrealisierung)",Adress-Service,2
+TKeasy-Rechnungswesen,Adress-Service,2
 KVNr-Meldungen,Adress-Service,14
 Melderegisterabgleich,Adress-Service,23
 Pflegeversicherung,Adress-Service,12

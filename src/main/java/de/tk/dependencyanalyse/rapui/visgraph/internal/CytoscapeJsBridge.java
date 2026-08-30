@@ -102,10 +102,28 @@ public final class CytoscapeJsBridge {
      * Send the NodeConfig to the iframe so the JS side can rebuild the
      * Cytoscape style-selector array. If data is already loaded, the JS
      * bridge will re-apply the style without re-creating elements.
+     *
+     * <p>When {@code config} carries {@code labelColors} or
+     * {@code globalTagColors}, this method ALSO walks the current graph,
+     * re-renders every {@code svgImage}-marked node whose effective
+     * background color changed, and ships the updated {@code data.image}
+     * URIs to the iframe via {@link SvgBadgeColorUpdater}. Without that
+     * step, SVG-badge nodes keep their original color baked into the URI
+     * even though the Cytoscape stylesheet background-color was
+     * overwritten — the {@code Apply Tag Colors} / {@code Apply NodeType
+     * Colors} buttons would not visibly recolor the badges.</p>
      */
     public void applyNodeConfig(NodeConfig config) {
         this.currentNodeConfig = config;
         exec("window.cgv_applyNodeConfig(" + gson.toJson(toJsonNodeConfig(config)) + ");");
+        List<SvgBadgeColorUpdater.ImageUpdate> recolors =
+                SvgBadgeColorUpdater.applyRecolors(currentData, config);
+        if (!recolors.isEmpty()) {
+            LOG.info("CytoscapeJsBridge.applyNodeConfig: "
+                    + recolors.size() + " SVG badges re-rendered with new colors");
+            exec("window.cgv_applyNodeImages("
+                    + gson.toJson(SvgBadgeColorUpdater.toJsonUpdates(recolors)) + ");");
+        }
     }
 
     /**

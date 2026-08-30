@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -25,6 +26,10 @@ import java.util.regex.Pattern;
  * any earlier type-based customizer.
  */
 public final class GraphNode {
+
+    private static final String SHAPE = "shape";
+
+    private static final String IMAGE = "image";
 
     private static final Logger LOG = Logger.getLogger(GraphNode.class.getName());
 
@@ -126,7 +131,7 @@ public final class GraphNode {
 
     public GraphNode setShape(Shape shape) {
         if (shape != null) {
-            visualAttrs.put("shape", shape.name().toLowerCase());
+            visualAttrs.put(SHAPE, shape.name().toLowerCase());
         }
         return this;
     }
@@ -137,8 +142,8 @@ public final class GraphNode {
     }
 
     public GraphNode setIcon(String url) {
-        visualAttrs.put("shape", "image");
-        visualAttrs.put("image", url);
+        visualAttrs.put(SHAPE, IMAGE);
+        visualAttrs.put(IMAGE, url);
         return this;
     }
 
@@ -184,10 +189,9 @@ public final class GraphNode {
         }
         // String rendered = renderIconSvg(source, color, type);
         String rendered = renderSvgIcon2(source, color, "white", type);
-        String dataUri = "data:image/svg+xml;charset=utf-8,"
-                + URLEncoder.encode(rendered, StandardCharsets.UTF_8);
-        visualAttrs.put("shape", "image");
-        visualAttrs.put("image", dataUri);
+        String dataUri = toSvgDataUri(rendered);
+        visualAttrs.put(SHAPE, IMAGE);
+        visualAttrs.put(IMAGE, dataUri);
         visualAttrs.put("label", label == null ? "" : label);
         return this;
     }
@@ -220,10 +224,9 @@ public final class GraphNode {
      */
     public GraphNode setSvgText(String typeName, String color, String label) {
         String rendered = renderSvgIcon3(typeName, color, label);
-        String dataUri = "data:image/svg+xml;charset=utf-8,"
-                + URLEncoder.encode(rendered, StandardCharsets.UTF_8);
-        visualAttrs.put("shape", "image");
-        visualAttrs.put("image", dataUri);
+        String dataUri = toSvgDataUri(rendered);
+        visualAttrs.put(SHAPE, IMAGE);
+        visualAttrs.put(IMAGE, dataUri);
         visualAttrs.put("label", label == null ? "" : label);
         return this;
     }
@@ -246,121 +249,6 @@ public final class GraphNode {
             LOG.log(Level.WARNING, "setSvgIcon: failed to read " + path, e);
             return null;
         }
-    }
-
-    /**
-     * Scale the icon to {@value #ICON_SIZE}×{@value #ICON_SIZE} pixels,
-     * recolor its path fills, and overlay the {@code type} character centered
-     * on the visible body of the icon.
-     */
-    private static String renderIconSvg(String source, String color, char type) {
-        String safeColor = (color == null || color.isEmpty()) ? DEFAULT_ICON_COLOR : color;
-
-        // 1) Determine the viewBox center for text placement.
-        //    We then shift the y coordinate DOWN by 22% of the viewBox height
-        //    so the character sits in the visible body of the icon (cup body,
-        //    folder body, document body, ...) rather than the geometric center
-        //    — most of these SVGs (java-16-, folder-, table-share-, source-code-)
-        //    have decorative elements at the top (steam lines, folder tab,
-        //    header bar, ...) and the meaningful "body" below the middle.
-        //    The visible-body center is empirically at ~y = cy + h * 0.22.
-        double cx = 8.0;
-        double cy = 8.0;
-        double vbX = 0.0;
-        double vbY = 0.0;
-        double vbW = 16.0;
-        double vbH = 16.0;
-        Matcher vb = VIEWBOX_PATTERN.matcher(source);
-        if (vb.find()) {
-            try {
-                double x = Double.parseDouble(vb.group(1));
-                double y = Double.parseDouble(vb.group(2));
-                double w = Double.parseDouble(vb.group(3));
-                double h = Double.parseDouble(vb.group(4));
-                cx = x + w / 2.0;
-                cy = y + h / 2.0 + h * 0.22;
-                vbX = x;
-                vbY = y;
-                vbW = w;
-                vbH = h;
-            } catch (NumberFormatException ignored) {
-                // fall back to defaults
-            }
-        }
-
-        // 2) Rewrite the root <svg ...> tag: drop any width/height and
-        //    inject the fixed 30x30 dimensions.
-        Matcher root = ROOT_SVG_PATTERN.matcher(source);
-        StringBuilder out = new StringBuilder();
-        if (root.find()) {
-            String attrs = SIZE_ATTR_PATTERN.matcher(root.group(1)).replaceAll("");
-            String replacement = "<svg width=\"" + ICON_SIZE + "\" height=\"" + ICON_SIZE + "\"" + attrs + ">";
-            root.appendReplacement(out, Matcher.quoteReplacement(replacement));
-            root.appendTail(out);
-            source = out.toString();
-        }
-
-        // 2b) Inject a background <rect> covering the BODY region of the
-        //     viewBox (lower ~56%) so the icon's main shape (cup body,
-        //     folder body, document body, ...) renders as a SOLID colored
-        //     badge rather than a hollow outline. The path sits on top:
-        //       - its filled areas (cup outline, folder edge, steam lines
-        //         above the body, ...) draw on top of the rect with the
-        //         same color and remain visible as the icon shape
-        //       - its unfilled "holes" (cup interior, gap between steam
-        //         and cup) now show the colored background instead of
-        //         transparency, so the shape reads as a SOLID cup / folder
-        //     We deliberately do NOT cover the upper ~44% of the viewBox:
-        //     the icons in /static/icons/ (java, folder, table-share,
-        //     source-code) carry decorative elements in the upper half
-        //     (steam, folder tab, header bar, ...) that should remain on a
-        //     transparent background so the icon does not become a plain
-        //     filled square.
-        //     Empirical body offset: top of body at ~y = vbY + 0.44 * vbH
-        //     (matches the cup-body top edge in java-16 and the folder-body
-        //     top in folder-svgrepo-com).
-        double bodyTop = vbY + vbH * 0.44;
-        double bodyHeight = vbH - (bodyTop - vbY);
-        String bgRect = "<rect x=\"" + vbX + "\" y=\"" + bodyTop
-            + "\" width=\"" + vbW + "\" height=\"" + bodyHeight + "\" fill=\"" + safeColor + "\"/>";
-        int svgOpen = source.indexOf("<svg");
-        if (svgOpen >= 0) {
-            int svgClose = source.indexOf('>', svgOpen);
-            if (svgClose >= 0) {
-                source = source.substring(0, svgClose + 1)
-                        + bgRect
-                        + source.substring(svgClose + 1);
-            }
-        }
-
-        // 3) Replace fill attributes on path elements only — this preserves
-        //    the root <svg fill="none"> sentinel that the icons rely on.
-        //    NB: do NOT wrap the replacement in Matcher.quoteReplacement —
-        //    it would escape the $1 backreference to a literal "$1", and
-        //    the entire <path ... d="..."> capture would be discarded.
-        source = PATH_FILL_PATTERN.matcher(source).replaceAll(
-                "$1fill=\"" + safeColor + "\"");
-
-        // 4) Overlay the type character centered on the icon.
-        //    Centering tricks (in order of reliability across browsers):
-        //      - text-anchor="middle"  → horizontal centering at x
-        //      - dy="0.35em"           → vertical centering at y (most reliable
-        //                                 cross-browser; works in Firefox,
-        //                                 Chromium, WebKit, VSCode webview,
-        //                                 older Safari, etc.)
-        //      - dominant-baseline     → unreliable, especially in Firefox
-        //                                 and some embedded webviews (VSCode),
-        //                                 where it can shift the text upward
-        //                                 by ~2px or be ignored entirely.
-        String textOverlay = "<text x=\"" + cx + "\" y=\"" + cy
-            + "\" font-family=\"Segoe UI, Arial, sans-serif\" font-size=\"6\" font-weight=\"bold\""
-            + " fill=\"#ffffff\" text-anchor=\"middle\" dy=\"0.35em\">"
-            + type + "</text>";
-        int closeIdx = source.lastIndexOf("</svg>");
-        if (closeIdx >= 0) {
-            source = source.substring(0, closeIdx) + textOverlay + source.substring(closeIdx);
-        }
-        return source;
     }
 
     /**
@@ -509,6 +397,80 @@ public final class GraphNode {
      *                        render helpers
      * @return the rendered SVG body, NOT wrapped in a data URI
      */
+
+    /**
+     * Build a {@code data:image/svg+xml;base64,…} data URI from a raw
+     * SVG body. Used by every viewer (cytoscape.js, vis-network) so the
+     * wire format is uniform across the application.
+     *
+     * <p>Base64 is the only encoding that works for both Cytoscape and
+     * vis-network:</p>
+     *
+     * <ul>
+     *   <li><strong>Cytoscape</strong> parses {@code background-image}
+     *       as a <em>list</em> of URLs (the {@code urls} type in the
+     *       cytoscape stylesheet) and splits on commas. URL-encoded SVG
+     *       bodies contain a comma right after the prefix and again
+     *       inside the encoded body, so Cytoscape treated the URI as
+     *       dozens of broken URLs and the SVG never loaded. Base64 has
+     *       no commas.</li>
+     *   <li><strong>vis-network</strong> uses
+     *       {@code new Image(); image.src = uri} — the browser's Image
+     *       loader accepts any RFC-2397 data URI, but the form-encoding
+     *       produced by {@link java.net.URLEncoder} encodes spaces as
+     *       {@code "+"} which the browser's data-URI decoder does NOT
+     *       unescape to space. Base64 has no spaces and decodes
+     *       byte-for-byte, so the browser always sees a valid SVG.</li>
+     * </ul>
+     */
+    public static String toSvgDataUri(String svgBody) {
+        if (svgBody == null) svgBody = "";
+        String b64 = Base64.getEncoder().encodeToString(
+                svgBody.getBytes(StandardCharsets.UTF_8));
+        return "data:image/svg+xml;base64," + b64;
+    }
+  
+    public static String renderSvgIcon4(String type, String backgroundColor, String label) {
+        String icon = "java-16-svgrepo-com.svg";
+        String circleColor = "#4c2af3"; // Green circle
+        char typeChar = (type != null && !type.isEmpty()) ? type.charAt(0) : ' ';
+
+        switch (type.toLowerCase()) {
+            case "class":
+                typeChar = 'C';
+                break;
+            case "enum":
+                typeChar = 'E';
+                break;
+            case "tkentity":
+                icon = "source-code.svg";
+                typeChar = 'E';
+                break;
+            case "tkcontroller":
+                icon = "source-code.svg";
+                typeChar = 'C';
+               break;
+            case "batchreader":
+                icon = "database-svgrepo-com.svg";
+                typeChar = 'R';
+                break;
+            case "batchwriter":
+                icon = "database-svgrepo-com.svg";
+                typeChar = 'W';
+                break;
+            case "tableinfo":
+                icon = "database-svgrepo-com.svg";
+                typeChar = 'T';
+                break;
+            default:
+                circleColor = "#9B9B9B"; // Gray circle
+        }
+    
+        String rawSvg =SvgRenderer.renderSvgIconWithAnnotation(icon, backgroundColor, circleColor, typeChar);
+
+        return rawSvg;
+    }
+
     public static String renderSvgIcon3(String type, String backgroundColor, String label) {
         String safeBg = (backgroundColor == null || backgroundColor.isEmpty())
                 ? DEFAULT_ICON_COLOR : backgroundColor;
@@ -581,6 +543,13 @@ public final class GraphNode {
      * As {@link #setSvgShape(String, String)} but with an explicit fill
      * color baked into the SVG. When {@code color} is {@code null}, the
      * bridge falls back to the node's current {@code color} attribute.
+     *
+     * <p>Stores both the {@code svgImage} descriptor (consumed by the
+     * Cytoscape bridge via {@link #resolveCytoscapeImage()}) AND a
+     * pre-rendered {@code image} data-URI plus {@code shape: image}
+     * (consumed by vis-network's {@link #toVisNetworkData()}). Without
+     * the pre-rendered data URI vis-network would receive only the raw
+     * {@code {label,type,color}} map and refuse to draw anything.</p>
      */
     public GraphNode setSvgShape(String label, String type, String color) {
         java.util.Map<String, String> info = new java.util.LinkedHashMap<>();
@@ -588,7 +557,66 @@ public final class GraphNode {
         info.put("type", type == null ? "" : type);
         if (color != null) info.put("color", color);
         visualAttrs.put("svgImage", info);
+
+        // Pre-render so vis-network (which reads `image` directly off the
+        // serialized node) sees a ready-to-use data URI. Cytoscape ignores
+        // this and re-renders from svgImage via resolveCytoscapeImage().
+        String safeBg = (color == null || color.isEmpty()) ? DEFAULT_ICON_COLOR : color;
+        String rendered = renderSvgIcon4(
+                type == null ? "" : type, safeBg,
+                label == null ? "" : label);
+        // vis-network surface: keep URL-encoded URI (vis does not split on
+        // commas and the existing payloads rely on this format).
+        String dataUri = toSvgDataUri(rendered);
+        visualAttrs.put(SHAPE, IMAGE);
+        visualAttrs.put(IMAGE, dataUri);
         return this;
+    }
+
+    /**
+     * Replace the background color of this node's SVG badge without
+     * touching the {@code label} / {@code type} fields. Both surfaces
+     * (the Cytoscape-specific {@code svgImage} descriptor and the
+     * vis-network pre-rendered {@code image} URI) are updated.
+     *
+     * <p>No-op when the node has not been marked as an SVG badge via
+     * {@link #setSvgShape(String, String)} / {@link #setSvgShape(String, String, String)} —
+     * non-badge nodes are colored via Cytoscape's {@code background-color}
+     * style and re-rendering their SVG would have no effect on either
+     * surface.</p>
+     *
+     * @param newColor hex color string (e.g. {@code "#4A90E2"});
+     *                 {@code null} or blank resets to the
+     *                 {@link #DEFAULT_ICON_COLOR} fallback
+     * @return {@code true} when the color actually changed and the
+     *         pre-rendered {@code image} data URI was regenerated
+     */
+    public boolean recolorSvgShape(String newColor) {
+        Object rawSvg = visualAttrs.get("svgImage");
+        if (!(rawSvg instanceof Map<?, ?> rawMap)) return false;
+        @SuppressWarnings("unchecked")
+        Map<String, String> info = (Map<String, String>) rawMap;
+        String safe = (newColor == null || newColor.isEmpty()) ? DEFAULT_ICON_COLOR : newColor;
+        String prev = info.get("color");
+        if (safe.equals(prev)) return false;
+        info.put("color", safe);
+        String label = info.getOrDefault("label", "");
+        String type  = info.getOrDefault("type", "");
+        String rendered = renderSvgIcon4(type, safe, label);
+        visualAttrs.put(IMAGE, toSvgDataUri(rendered));
+        return true;
+    }
+
+    /**
+     * Returns the {@code svgImage} descriptor map written by
+     * {@link #setSvgShape(String, String, String)} — or {@code null} if
+     * the node has not been marked as an SVG badge. The returned map is
+     * the live internal map; callers MUST NOT mutate it (use
+     * {@link #recolorSvgShape(String)} for safe updates).
+     */
+    public Map<String, String> getSvgImage() {
+        Object raw = visualAttrs.get("svgImage");
+        return (raw instanceof Map<?, ?>) ? (Map<String, String>) raw : null;
     }
 
     public GraphNode setAttribute(String key, Object value) {
@@ -724,6 +752,59 @@ public final class GraphNode {
     }
 
     /**
+     * Build the {@code data.image} payload consumed by the Cytoscape bridge.
+     *
+     * <p>Returns a ready-to-use {@code image} value (either a caller-supplied
+     * URL/URI from {@link #setIcon(String)} / {@link #setSvgIcon} or a freshly
+     * rendered SVG data URI built via {@link #renderSvgIcon3} from the
+     * {@code svgImage} map written by {@link #setSvgShape(String, String, String)}).
+     * The Cytoscape JS bridge picks up this value and emits a
+     * {@code background-image} style on the corresponding node.</p>
+     *
+     * <p>Returns {@code null} when no visual-attribute entry requests an
+     * image — non-image nodes pass through untouched.</p>
+     */
+    @SuppressWarnings("unchecked")
+    private String resolveCytoscapeImage() {
+        // 1) svgImage descriptor from setSvgShape(...). This is the
+        //    Cytoscape-specific entry; check it FIRST so the Cytoscape
+        //    surface gets a base64-encoded URI even when setSvgShape also
+        //    pre-baked a URL-encoded URI for the vis-network surface
+        //    (see setSvgShape for the dual-encoding rationale).
+        Object rawSvg = visualAttrs.get("svgImage");
+        if (rawSvg instanceof Map<?, ?> map) {
+            String type  = stringify(map.get("type"));
+            String label = stringify(map.get("label"));
+            String color = stringify(map.get("color"));
+            String background = (color == null || color.isEmpty())
+                    ? DEFAULT_ICON_COLOR : color;
+            String rendered = renderSvgIcon4(
+                    type == null ? "" : type, background,
+                    label == null ? "" : label);
+            // Cytoscape surface: base64, not URL-encoded. Cytoscape parses
+            // background-image as a comma-separated URL list and would split
+            // a URL-encoded SVG payload at every comma in the SVG body,
+            // silently breaking the image. Base64 has no commas and is
+            // universally supported by the browser's Image() loader that
+            // Cytoscape uses for background-image rendering.
+            return toSvgDataUri(rendered);
+        }
+        // 2) Explicit image URL/URI from setIcon(...) / setSvgIcon(...).
+        //    Pass through verbatim. For HTTP(S) URLs and short data: URIs
+        //    (without embedded commas) Cytoscape can load them directly.
+        Object rawImage = visualAttrs.get(IMAGE);
+        if (rawImage instanceof String s && !s.isEmpty()) {
+            return s;
+        }
+        return null;
+    }
+
+    /** Stringify an svgImage map value, returning {@code null} for null/non-string. */
+    private static String stringify(Object v) {
+        return v == null ? null : String.valueOf(v);
+    }
+
+    /**
      * Serializes the node as a Cytoscape.js element entry:
      * {@code { data: { id, label, nodeType, nodeTag, ...all-properties, tooltip? } }}.
      *
@@ -787,6 +868,14 @@ public final class GraphNode {
             if (key.equals("_nodeType_")) continue;
             if (data.containsKey(key)) continue;
             data.put(key, e.getValue());
+        }
+        // Resolve a Cytoscape data.image entry when the node has been marked
+        // as an SVG badge via setSvgShape(...) or setIcon(...) / setSvgIcon(...).
+        // The JS bridge turns `data.image` into a Cytoscape `background-image`
+        // on the node selector so the SVG renders inside the node shape.
+        String cytoscapeImage = resolveCytoscapeImage();
+        if (cytoscapeImage != null && !cytoscapeImage.isEmpty()) {
+            data.put(IMAGE, cytoscapeImage);
         }
         // Tooltip: prefer override, otherwise build from properties.
         String tooltip = tooltipOverride

@@ -177,8 +177,12 @@ public class CsvExampleEntryPoint extends AbstractEntryPoint {
                 String id = optString(data, "id", null);
                 if (id == null) continue;
                 List<String> labels = new ArrayList<>();
-                if (data.has("nodeType")) labels.add(data.get("nodeType").getAsString());
-                else labels.add("Node");
+                if (data.has("_nodeType_")) {                    
+                    String nodeType = data.get("_nodeType_").getAsString();
+                    labels.add(nodeType);
+                } else {
+                    labels.add("Node");
+                }
                 Map<String, Object> props = jsonProps(data);
                 nodes.put(id, new GraphNode(id, labels, props));
             }

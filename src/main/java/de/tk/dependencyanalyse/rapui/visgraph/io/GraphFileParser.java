@@ -186,7 +186,18 @@ public final class GraphFileParser {
             List<String> labels = (label != null && !label.isEmpty())
                     ? List.of(label)
                     : List.of("Node");
-            nodes.putIfAbsent(id, new GraphNode(id, labels, extraProps));
+            GraphNode graphNode = new GraphNode(id, labels, extraProps);
+            // Mark the node as an SVG-badge so the Cytoscape bridge renders
+            // it via background-image / round-rectangle and vis-network
+            // renders it via shape=image. setSvgShape does both; calling
+            // renderSvgIcon3() directly is a no-op because its return value
+            // is the rendered SVG string, not a setter side-effect.
+            if( extraProps.get("_nodeType_") != null ) {
+                graphNode.setSvgShape(label, (String) extraProps.get("_nodeType_"), "#00FFFF");
+            } else {
+                graphNode.setSvgShape(label, "Node", id);
+            }
+            nodes.putIfAbsent(id, graphNode);
         }
     }
 

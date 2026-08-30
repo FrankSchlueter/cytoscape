@@ -96,11 +96,20 @@ public final class VisJsBridge {
 
     public void applyNodeConfig(NodeConfig config) {
         this.currentNodeConfig = config;
-        // Always push the config to the iframe so future JS-side hooks (e.g.
-        // font size) can pick it up.
-        exec("window.vgv_applyNodeConfig(" + gson.toJson(toJsonNodeConfig(config)) + ");");
         if (currentData != null) {
-            applyData(currentData);
+            // Re-render SVG badges with the new colors and push the
+            // updated image URIs / color.background updates to the iframe.
+            // vis-network has no stylesheet engine like Cytoscape, so the
+            // effective color must be applied per-node — see
+            // SvgBadgeColorUpdater.applyRecolorsBoth.
+            List<Map<String, Object>> recolors =
+                    SvgBadgeColorUpdater.applyRecolorsBoth(currentData, config);
+            if (!recolors.isEmpty()) {
+                LOG.info("VisJsBridge.applyNodeConfig: "
+                        + recolors.size() + " nodes re-rendered with new colors");
+                exec("window.vgv_applyNodeImages("
+                        + gson.toJson(recolors) + ");");
+            }
         }
     }
 
@@ -147,10 +156,14 @@ public final class VisJsBridge {
     /**
      * Push a NodeConfig to the iframe WITHOUT triggering a re-apply. Used by
      * unit tests and the GraphViewer when the current data is not yet set.
+     *
+     * <p>vis-network's viewer has no stylesheet engine — the config is
+     * only used by the Cytoscape bridge. The method is kept for
+     * backwards compatibility with callers that explicitly want to store
+     * the config without applying it.</p>
      */
     public void pushNodeConfig(NodeConfig config) {
         this.currentNodeConfig = config;
-        exec("window.vgv_applyNodeConfig(" + gson.toJson(toJsonNodeConfig(config)) + ");");
     }
 
     public void showContextMenu(List<ContextMenuEntry> entries, int x, int y) {

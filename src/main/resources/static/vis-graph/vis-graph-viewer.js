@@ -227,7 +227,7 @@
             // To get HTML rendering, we must convert title HTML to a DOM element.
             // See: div frame.innerText=t  in the vis-network minified source.
             if (pendingData.nodes) {
-                nodes.add(pendingData.nodes.map(n => applySvgIcon(applySvgImage(wrapTitleAsElement(n)))));
+                nodes.add(pendingData.nodes.map(n => applySvgImage(wrapTitleAsElement(n))));
             }
             if (pendingData.edges) {
                 edges.add(pendingData.edges.map(e => wrapTitleAsElement(e)));
@@ -248,269 +248,57 @@
 
     /* ----- API: node configuration ----- */
 
-    var __vgv_nodeConfig = { showTitle: true, labelColors: {}, tagColors: {} };
-
-    window.vgv_applyNodeConfig = function (configJson) {
-        try {
-            var cfg = typeof configJson === 'object' ? configJson : JSON.parse(configJson);
-            if (cfg && typeof cfg === 'object') {
-                __vgv_nodeConfig = {
-                    showTitle: cfg.showTitle !== false,
-                    labelColors: cfg.labelColors || {},
-                    tagColors: cfg.tagColors || {}
-                };
-            }
-        } catch (e) {
-            console.error('vgv_applyNodeConfig: invalid config', e);
-        }
+    /**
+     * Push a batched list of per-node visual updates to vis-network. Each
+     * update is one of:
+     *
+     * <ul>
+     *   <li><code>{id, image: "&lt;base64 data URI&gt;"}</code> — replaces
+     *       the SVG-badge image with the freshly rendered one. vis-network
+     *       will fetch and cache the new data URI on the next draw.</li>
+     *   <li><code>{id, color: {background, border}}</code> — applies the
+     *       new color to a plain (non-image) node.</li>
+     * </ul>
+     *
+     * <p>vis-network's {@code DataSet.update} handles the rest — it
+     * triggers the redraw automatically and re-uses its internal
+     * {@code Mb} image cache for SVG badges.</p>
+     */
+    window.vgv_applyNodeImages = function (updates) {
+        if (!networkReady || !updates || updates.length === 0) return;
+        // vis-network's DataSet.update emits an 'update' event that vis-network
+        // picks up via its internal listener — but the redraw happens on
+        // the next animation frame, and only for properties whose values
+        // actually changed. To force a synchronous re-render that always
+        // takes effect (so the new image / color is visible immediately,
+        // especially right after a graph-configuration change), we also
+        // call network.redraw() after the update.
+        nodes.update(updates);
+        try { network.redraw(); } catch (e) { /* ignore */ }
     };
 
     /* ----- API: SVG node images ----- */
 
     /**
-     * Build an SVG badge for a node:
-     *   - rounded rectangle filled with the node color
-     *   - stereotype («Class», «Enum», …) above the name
-     *   - bold label centered inside
-     * Returns the raw SVG string (caller wraps it as a data URI).
-     */
-    window.vgv_createSvgNode = function (label, color, type) {
-        var safeLabel = (label == null ? '' : String(label));
-        var safeColor = (color == null || color === '') ? '#4A90E2' : color;
-        var estWidth = Math.max(120, safeLabel.length * 8 + 40);
-        var height = 40;
-
-        var typeLabel = '';
-        switch (type) {
-            case 'class':     typeLabel = '\u00ABClass\u00BB';     break;
-            case 'enum':      typeLabel = '\u00ABEnum\u00BB';      break;
-            case 'record':    typeLabel = '\u00ABRecord\u00BB';    break;
-            case 'controller':typeLabel = '\u00ABController\u00BB';break;
-            case 'entity':    typeLabel = '\u00ABEntity\u00BB';    break;
-            case 'table':     typeLabel = '\u00ABTable\u00BB';     break;
-            default:          typeLabel = '\u00AB' + (type || '') + '\u00BB';
-        }
-
-        return [
-            '<svg xmlns="http://www.w3.org/2000/svg" width="', estWidth,
-            '" height="', height, '" viewBox="0 0 ', estWidth, ' ', height, '">',
-            '<rect x="2" y="2" width="', (estWidth - 4), '" height="', (height - 4),
-            '" rx="6" ry="6" fill="', safeColor,
-            '" stroke="#ffffff" stroke-width="1.5" />',
-            '<text x="', (estWidth / 2), '" y="15" ',
-            'font-family="Segoe UI, Arial, sans-serif" font-size="10" font-weight="bold" ',
-            'fill="rgba(255,255,255,0.85)" text-anchor="middle">', typeLabel, '</text>',
-            '<text x="', (estWidth / 2), '" y="29" ',
-            'font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="bold" ',
-            'fill="#ffffff" text-anchor="middle">', safeLabel, '</text>',
-            '</svg>'
-        ].join('');
-    };
-
-    /**
-     * If a node carries an {@code svgImage} attribute, materialize it into a
-     * data URI {@code image} field (so vis-network renders the SVG) and set
-     * the shape to {@code "image"}. Returns the (possibly mutated) node.
-     *
-     * <p>As a backward-compat safety net, also normalizes an existing
-     * {@code image} field when it is an SVG data URI emitted by the server
-     * side. {@code GraphNode.setSvgIcon} builds the data URI on the Java
-     * side using {@code URLEncoder.encode}, which encodes spaces as
-     * {@code "+"} (form-encoding). Browsers do <em>not</em> decode
-     * {@code "+"} as space inside data URIs (WHATWG / RFC 3986), so the
-     * resulting URI is invalid and vis-network falls back to
-     * {@code brokenImage}. {@link vgv_normalizeSvgDataUri} rewrites the
-     * body with proper percent-encoding so the browser can decode it.</p>
+     * If a node carries an {@code svgImage} attribute, the Java side has
+     * already produced a fully-rendered SVG (icon + annotation circle +
+     * typeChar) and stored it as {@code image} on the node. We simply
+     * drop the {@code svgImage} descriptor — the vis-network viewer
+     * must NOT re-render the SVG itself, doing so would discard the
+     * icon. Returns the (possibly mutated) node.
      */
     function applySvgImage(n) {
         if (!n) return n;
-        if (typeof n.image === 'string' && n.image.indexOf('data:image/svg') === 0) {
-            n.image = vgv_normalizeSvgDataUri(n.image);
-        }
         if (!n.svgImage) return n;
-        var info = n.svgImage;
-        var color = info.color;
-        if (!color) {
-            color = (typeof n.color === 'string' && n.color !== '')
-                ? n.color
-                : (n.color && n.color.background) ? n.color.background
-                : '#4A90E2';
-        }
-        var label = info.label || n.label || n.id || '';
-        var type = info.type || 'class';
-        var svg = window.vgv_createSvgNode(label, color, type);
-        n.image = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
-        n.shape = 'image';
         delete n.svgImage;
+        if (typeof n.image === 'string' && n.image.indexOf('data:image/') === 0) {
+            n.shape = 'image';
+        }
         return n;
-    }
-
-    /**
-     * Build a 30×30 SVG icon badge from a raw icon SVG body:
-     *   - rewrites the root {@code <svg>} tag with fixed 30×30 dimensions
-     *     (stripping any pre-existing width/height)
-     *   - recolors all {@code <path>} fill attributes with {@code color},
-     *     preserving a {@code fill="none"} sentinel on the root element
-     *   - overlays the {@code type} character centered on the icon's
-     *     viewBox
-     * Returns the raw SVG string. The caller wraps it as a data URI.
-     */
-    window.vgv_createSvgIcon = function (svgBody, color, type) {
-        var size = 30;
-        var safeColor = (color == null || color === '') ? '#4A90E2' : color;
-        var safeType = (type == null) ? '' : String(type);
-        var src = (svgBody == null) ? '' : String(svgBody);
-        // Strip any <?xml ... ?> declaration: optional for SVG-as-image,
-        // and some embedded webviews (VSCode, Electron) handle it poorly.
-        src = src.replace(/<\?xml[^?]*\?>\s*/, '');
-
-        // 1) Determine the viewBox center, then shift the y DOWN by 22% of
-        //    the viewBox height so the type character lands on the visible
-        //    body of the icon (cup body, folder body, ...) rather than the
-        //    geometric center. Most icons in /static/icons/ carry decorative
-        //    elements at the top (steam, folder tab, header bar, ...) and
-        //    their meaningful body sits below the geometric middle.
-        var cx = 8.0;
-        var cy = 8.0;
-        var vbX = 0.0;
-        var vbY = 0.0;
-        var vbW = 16.0;
-        var vbH = 16.0;
-        var vbMatch = /viewBox\s*=\s*"\s*([\d.+\-eE]+)\s+([\d.+\-eE]+)\s+([\d.+\-eE]+)\s+([\d.+\-eE]+)/
-            .exec(src);
-        if (vbMatch) {
-            var x = parseFloat(vbMatch[1]);
-            var y = parseFloat(vbMatch[2]);
-            var w = parseFloat(vbMatch[3]);
-            var h = parseFloat(vbMatch[4]);
-            if (!isNaN(x) && !isNaN(y) && !isNaN(w) && !isNaN(h)) {
-                cx = x + w / 2.0;
-                cy = y + h / 2.0 + h * 0.22;
-                vbX = x; vbY = y; vbW = w; vbH = h;
-            }
-        }
-
-        // 2) Rewrite the root <svg ...> tag: drop any width/height and inject 30×30.
-        src = src.replace(/<svg([^>]*)>/i, function (_match, attrs) {
-            var stripped = attrs.replace(/\s(?:width|height)\s*=\s*"[^"]*"/gi, '');
-            return '<svg width="' + size + '" height="' + size + '"' + stripped + '>';
-        });
-
-        // 2b) Inject a background <rect> covering the BODY region of the
-        //     viewBox (lower ~56%) so the icon's main shape (cup body,
-        //     folder body, document body, ...) renders as a SOLID colored
-        //     badge rather than a hollow outline. The path sits on top:
-        //       - its filled areas (cup outline, folder edge, steam lines
-        //         above the body, ...) draw on top of the rect with the
-        //         same color and remain visible as the icon shape
-        //       - its unfilled "holes" (cup interior, gap between steam
-        //         and cup) now show the colored background instead of
-        //         transparency, so the shape reads as a SOLID cup / folder
-        //     We deliberately do NOT cover the upper ~44% of the viewBox:
-        //     the icons in /static/icons/ (java, folder, table-share,
-        //     source-code) carry decorative elements in the upper half
-        //     (steam, folder tab, header bar, ...) that should remain on a
-        //     transparent background so the icon does not become a plain
-        //     filled square.
-        //     Empirical body offset: top of body at ~y = vbY + 0.44 * vbH
-        //     (matches the cup-body top edge in java-16 and the folder-body
-        //     top in folder-svgrepo-com).
-        var bodyTop = vbY + vbH * 0.44;
-        var bodyHeight = vbH - (bodyTop - vbY);
-        var bgRect = '<rect x="' + vbX + '" y="' + bodyTop
-            + '" width="' + vbW + '" height="' + bodyHeight + '" fill="' + safeColor + '"/>';
-        var svgOpen = src.indexOf('<svg');
-        if (svgOpen >= 0) {
-            var svgClose = src.indexOf('>', svgOpen);
-            if (svgClose >= 0) {
-                src = src.substring(0, svgClose + 1)
-                    + bgRect
-                    + src.substring(svgClose + 1);
-            }
-        }
-
-        // 3) Replace fill attributes on <path> elements only — this preserves
-        //    the root <svg fill="none"> sentinel the icons rely on.
-        src = src.replace(/(<path\b[^>]*?)\bfill\s*=\s*"[^"]*"/gi,
-            '$1fill="' + safeColor + '"');
-
-        // 4) Overlay the type character centered on the icon.
-        //    Uses dy="0.35em" for vertical centering (reliable across Firefox,
-        //    Chromium, WebKit, and embedded webviews). dominant-baseline is
-        //    NOT used because Firefox and some Chromium-based webviews
-        //    (notably VSCode's) honor it inconsistently.
-        var textOverlay = '<text x="' + cx + '" y="' + cy
-            + '" font-family="Segoe UI, Arial, sans-serif" font-size="6" font-weight="bold"'
-            + ' fill="#ffffff" text-anchor="middle" dy="0.35em">'
-            + safeType + '</text>';
-        var closeIdx = src.lastIndexOf('</svg>');
-        if (closeIdx >= 0) {
-            src = src.substring(0, closeIdx) + textOverlay + src.substring(closeIdx);
-        }
-        return src;
-    };
-
-    /**
-     * If a node carries an {@code svgIcon} attribute, materialize it into a
-     * data URI {@code image} field (so vis-network renders the SVG) and set
-     * the shape to {@code "image"}. Returns the (possibly mutated) node.
-     *
-     * <p>Expected {@code svgIcon} shape:
-     * <pre>{ body: '&lt;svg&gt;...&lt;/svg&gt;', color: '#4A90E2', type: 'C' }</pre>
-     * where {@code body} is the raw icon SVG (NOT a data URI), {@code color}
-     * is the fill color (defaults to {@code '#4A90E2'} when falsy), and
-     * {@code type} is a single character rendered centered on the icon.</p>
-     */
-    function applySvgIcon(n) {
-        if (!n || !n.svgIcon) return n;
-        var info = n.svgIcon;
-        var color = info.color;
-        if (!color) {
-            color = (typeof n.color === 'string' && n.color !== '')
-                ? n.color
-                : (n.color && n.color.background) ? n.color.background
-                : '#4A90E2';
-        }
-        var type = info.type || '';
-        var body = info.body || '';
-        var svg = window.vgv_createSvgIcon(body, color, type);
-        n.image = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
-        n.shape = 'image';
-        delete n.svgIcon;
-        return n;
-    }
-
-    /**
-     * Rewrite an SVG data URI that uses form-encoding for spaces
-     * ({@code "+"}) so the browser can decode it as percent-encoding.
-     *
-     * <p>Java's {@code URLEncoder.encode} produces
-     * {@code application/x-www-form-urlencoded} output, which is invalid
-     * inside a data URI body. This helper decodes and re-encodes the body
-     * with proper RFC-3986 percent-encoding.</p>
-     *
-     * <p>Idempotent: a URI that is already properly percent-encoded is
-     * returned unchanged (the decode/re-encode round-trip is a no-op for
-     * valid percent-encoding).</p>
-     */
-    function vgv_normalizeSvgDataUri(uri) {
-        if (typeof uri !== 'string') return uri;
-        if (uri.indexOf('data:image/svg') !== 0) return uri;
-        var commaIdx = uri.indexOf(',');
-        if (commaIdx < 0) return uri;
-        var meta = uri.substring(5, commaIdx);
-        var body = uri.substring(commaIdx + 1);
-        // form-encoding → percent-encoding for spaces
-        body = body.replace(/\+/g, '%20');
-        try {
-            var decoded = decodeURIComponent(body);
-            return 'data:' + meta + ',' + encodeURIComponent(decoded);
-        } catch (e) {
-            return 'data:' + meta + ',' + body;
-        }
     }
 
     /* ----- API: data ----- */
+
 
     window.vgv_setData = function () {
         if (!networkReady) {
@@ -530,7 +318,7 @@
         // To get HTML rendering, we must convert title HTML to a DOM element.
         nodes.clear();
         edges.clear();
-        if (window.__vgv_nodes) nodes.add(window.__vgv_nodes.map(n => applySvgIcon(applySvgImage(wrapTitleAsElement(n)))));
+        if (window.__vgv_nodes) nodes.add(window.__vgv_nodes.map(n => applySvgImage(wrapTitleAsElement(n))));
         if (window.__vgv_edges) edges.add(window.__vgv_edges.map(e => wrapTitleAsElement(e)));
         window.__vgv_nodes = null;
         window.__vgv_edges = null;
