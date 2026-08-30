@@ -918,7 +918,7 @@ public class GraphConfigurationDialog extends Dialog {
     private void buildLegendSection() {
         legendEnableCheck = new Button(shell, SWT.CHECK);
         legendEnableCheck.setText("Enable Legend");
-        legendEnableCheck.setSelection(false);
+        legendEnableCheck.setSelection(true);
         GridData enGD = new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1);
         legendEnableCheck.setLayoutData(enGD);
         legendEnableCheck.addSelectionListener(new SelectionAdapter() {

@@ -1442,17 +1442,30 @@
     }
 
     /**
-     * Row-Click-Handler. Triggert den Java-`relListeners`-Callback, indem
-     * die Cytoscape-Selection auf das entsprechende Edge gesetzt wird —
-     * der bestehende {@code cy.on('tap', 'edge', …)}-Listener ruft dann
-     * seinerseits {@code javaCall('cgv_notifyRelationshipSelected', …)}
-     * auf. Kein neuer Java-Bridge-Code nötig.
+     * Row-Click-Handler. Triggert den Java-`relListeners`-Callback
+     * <em>direkt</em> via {@code javaCall('cgv_notifyRelationshipSelected', …)}.
+     *
+     * <p>Wichtig: Wir verlassen uns NICHT darauf, dass
+     * {@code edge.select()} ein 'tap'-Event im Canvas feuert — der
+     * existierende {@code cy.on('tap', 'edge', …)}-Listener reagiert nur
+     * auf User-Maus-Events innerhalb des Canvas, nicht auf
+     * programmatische Selektionen. Da der Tabellen-Row außerhalb des
+     * Canvas liegt, würde der Callback sonst nie ausgelöst.</p>
+     *
+     * <p>Die {@code edge.select()}-Aufrufe bleiben für die visuelle
+     * Cytoscape-Hervorhebung (roter Selection-Border) — die sind orthogonal
+     * zum Java-Callback.</p>
      */
     function onEdgeRowClick(edgeId, evt) {
         if (evt) evt.stopPropagation();
         if (!cy) return;
         var edge = cy.getElementById(edgeId);
         if (!edge || edge.length === 0) return;
+        // 1) Java-Callback direkt feuern — umgeht den tap-only-Listener.
+        javaCall('cgv_notifyRelationshipSelected', edge.id());
+        // 2) Cytoscape-Selection setzen, damit der rote Border sichtbar
+        //    wird und ein anschließendes Background-Tap konsistent
+        //    cgv_notifySelectionCleared feuert.
         cy.elements().unselect();
         edge.select();
     }

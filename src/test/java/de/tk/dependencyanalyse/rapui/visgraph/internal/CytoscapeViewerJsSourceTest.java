@@ -742,13 +742,14 @@ class CytoscapeViewerJsSourceTest {
     }
 
     @Test
-    void onEdgeRowClickCallsEdgeSelectToTriggerJavaCallback() throws Exception {
-        // The table row click must select the corresponding edge in
-        // Cytoscape. The existing 'tap edge' listener then calls
-        // javaCall('cgv_notifyRelationshipSelected', edge.id()) which
-        // routes through CytoscapeJsBridge.FN_REL_SELECTED into the
-        // Java RelationshipSelectionListener. No new BrowserFunction
-        // is needed.
+    void onEdgeRowClickCallsJavaCallbackDirectly() throws Exception {
+        // The table row click must invoke cgv_notifyRelationshipSelected
+        // DIRECTLY (not indirectly via the 'tap edge' listener). The
+        // tap-edge listener only fires for mouse events INSIDE the
+        // canvas; since the table row is rendered outside the canvas
+        // (#cgv-edges is a sibling of #cy), that listener never runs.
+        // Without the direct javaCall the Java relListeners callback
+        // would never fire — see cytoscape-viewer.js onEdgeRowClick.
         String src = readViewerJs();
         assertTrue(src.contains("function onEdgeRowClick"),
                 "cytoscape-viewer.js must define onEdgeRowClick()");
@@ -757,8 +758,18 @@ class CytoscapeViewerJsSourceTest {
         Matcher m = body.matcher(src);
         assertTrue(m.find(), "onEdgeRowClick must have a body");
         String fn = m.group(1);
+        // 1) DIRECT javaCall — must come BEFORE edge.select() so the
+        //    Java side is notified even if edge.select() fails or the
+        //    selection event never reaches the listener.
+        assertTrue(fn.contains("javaCall('cgv_notifyRelationshipSelected'"),
+                "onEdgeRowClick must call javaCall('cgv_notifyRelationshipSelected', …) "
+                        + "DIRECTLY — the 'tap edge' listener only fires for canvas-internal taps, "
+                        + "and the table row lives outside the canvas. Without this direct call "
+                        + "the Java relListeners callback is never triggered.");
+        // 2) edge.select() must still happen so the Cytoscape selection
+        //    visuals (red border) reflect the row click.
         assertTrue(fn.contains("edge.select(") || fn.contains(".select()"),
-                "onEdgeRowClick must call edge.select() so the existing tap-edge listener fires cgv_notifyRelationshipSelected");
+                "onEdgeRowClick must still call edge.select() so the Cytoscape selection visuals match the table row");
         assertTrue(fn.contains("unselect"),
                 "onEdgeRowClick must clear the current Cytoscape selection before selecting the clicked edge");
     }
