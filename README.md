@@ -59,6 +59,62 @@ Am unteren Bildschirmrand:
    Web-Worker `cytoscape-leiden-worker.js` als alternative Browser-Lösung)
    und färbt die Nodes nach Community-Zugehörigkeit ein.
 
+   **Cluster-Layout-Strategie (nur Cytoscape)**: zusätzlich zum Recolor
+   wird in der Cytoscape-Engine die 3-Säulen-Strategie aus
+   `Cluster-Layout.md` aktiviert:
+   - **Compound-Cluster-Parents** (`injectClusterParents` in
+     `cytoscape-viewer.js`) — pro Community wird ein
+     `node[?isCluster]`-Container mit gestrichelter Border und
+     Hintergrund-Fill in der Community-Farbe eingefügt; Member-Nodes
+     bekommen `data.parent = cluster_<idx>`.
+   - **fcose mit Compound-Kräften** (`ClusterLayoutOptions`) —
+     `nestingFactor`, `gravityRangeCompound`, `gravityCompound`,
+     `nodeRepulsion`, `idealInterClusterEdgeLength` und
+     `randomize=false` (überschrieben vom JS-Bridge, damit die
+     preseeded Cluster-Zentren erhalten bleiben).
+   - **Log-gewichtete Federn** — `idealEdgeLength` und
+     `edgeElasticity` lesen `data('logWeight')` (= `ln(weight+1)`,
+     vorgerechnet in `GraphRelationship.toCytoscapeEdge()`), so dass
+     extreme Kantengewichte (1…10 000) gestaucht werden.
+
+   **Pre-Layout Edge-Filter (Cluster-Layout.md §5)** — Combo
+   `Min. ln(weight+1) fürs Layout` im Clustering-Abschnitt. Edges
+   unterhalb des Schwellwerts (Default `2.0`, entspricht
+   `weight ≥ e²−1 ≈ 6.4`) werden per `partitionEdgesForLayout` aus
+   `cy.add()` herausgehalten, damit fcose die Cluster-Struktur ohne
+   Hintergrundrauschen berechnet. Die schwachen Edges werden via
+   `restoreHeldBackEdges()` nach dem `layoutstop`-Event wieder
+   hinzugefügt — sie folgen den vom Layout gesetzten Knoten-Positionen
+   und verzerren die Cluster-Separation nicht. Auswahl `aus`
+   deaktiviert den Filter (Status quo, alle Edges im Layout).
+   Das Status-Label zeigt die Wirkung mit „X/Y Edges im Layout".
+
+   **Sqrt-basierte Edge-Dicke** — `clusterEdgeStyle()` skaliert die
+   Kantenbreite sub-linear
+   `0.6 + 0.9 · sqrt(min(max(logWeight, 0), 4))` → 0.6…2.4 px.
+   Ersetzt die alte `mapData(logWeight, 1, 10, 1.5, 9)`-Skalierung, die
+   wegen Cytoscapes Out-of-Range-Clamping 36 % der export.csv-Edges an
+   der Untergrenze festgenagelt hat.
+
+   **Cluster-Edges-Tabelle** — Beim Click auf einen Legend-Eintrag
+   blendet sich zusätzlich zur Hervorhebung eine Tabelle mit allen
+   Edges des Clusters ein (rechts oben, gestapelt unter dem Legend-
+   Panel). Spalten: **From** (Source-Node-Name), **Weight**, **To**
+   (Target-Node-Name). Intra-Cluster-Edges zuerst, dann nach Weight
+   absteigend; Brücken-Edges (zwischen Cluster und Außenwelt) sind
+   kursiv markiert (`cgv-edge-bridge` CSS-Klasse). Click auf eine
+   Tabellenzeile ruft den Java-`relListeners`-Callback auf (über den
+   normalen Cytoscape-`tap edge`-Pfad: `edge.select()` → `tap edge`-
+   Handler → `cgv_notifyRelationshipSelected` → Java
+   `RelationshipSelectionListener.relationshipSelected(...)`). Die
+   Tabelle verschwindet, sobald das Highlight gelöscht wird (zweiter
+   Click auf gleichen Legend-Eintrag, anderer Legend-Eintrag, oder
+   Background-Tap).
+
+   vis-network hat keine Compound-Node-Semantik; dort werden die
+   Community-Farben gesetzt, aber kein Cluster-Layout ausgelöst. Der
+   Status-Text im Dialog weist darauf hin.
+
 4. **Legend (optional)** — Checkbox `Enable Legend` plus Combo `Source`
    (`Combined`, `Tag Values`, `Leiden Clusters`, `Node Types`). Das Panel
    erscheint oben rechts im Viewer (vis & cytoscape) und erklärt jede

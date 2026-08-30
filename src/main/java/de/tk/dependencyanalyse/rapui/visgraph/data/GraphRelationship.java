@@ -287,7 +287,7 @@ public final class GraphRelationship {
      * vis-network's {@code from}/{@code to}).</p>
      *
      * <p>When a {@code weight} is present, both the raw value and the
-     * pre-computed {@code log10Weight} are surfaced as top-level data
+     * pre-computed {@code logWeight} are surfaced as top-level data
      * fields so the JS bridge can use them directly for fcose's
      * {@code idealEdgeLength} without having to dereference properties.</p>
      *
@@ -312,7 +312,7 @@ public final class GraphRelationship {
         Double w = getWeight();
         if (w != null) {
             data.put(PROP_WEIGHT, w);
-            data.put("log10Weight", Math.log(getEffectiveWeight()+1));
+            data.put("logWeight", Math.log(getEffectiveWeight()+1));
         }
         for (Map.Entry<String, Object> e : properties.entrySet()) {
             if (data.containsKey(e.getKey())) continue;

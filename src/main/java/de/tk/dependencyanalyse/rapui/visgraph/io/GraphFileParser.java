@@ -226,7 +226,7 @@ public final class GraphFileParser {
             if (!nodes.containsKey(source)) nodes.put(source, autoNode(source));
             if (!nodes.containsKey(target)) nodes.put(target, autoNode(target));
             // Make sure weight is always a double — the Cytoscape
-            // serializer computes log10Weight from PROP_WEIGHT, and a
+            // serializer computes logWeight from PROP_WEIGHT, and a
             // string "1" would yield null downstream.
             coerceWeight(extraProps);
             edgeSeq++;
@@ -281,7 +281,7 @@ public final class GraphFileParser {
         if (w == null) {
             // Some GML dialects (e.g. Gephi exports) use "value" instead of
             // "weight". Promote "value" into PROP_WEIGHT so the downstream
-            // log10Weight computation kicks in.
+            // logWeight computation kicks in.
             Object v = props.get("value");
             if (v instanceof Number num) {
                 w = num.doubleValue();

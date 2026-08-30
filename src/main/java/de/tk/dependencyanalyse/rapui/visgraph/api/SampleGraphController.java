@@ -80,7 +80,7 @@ public class SampleGraphController {
      *
      * <p>The raw weight read from the CSV is stored as-is in
      * {@code properties["weight"]}. The Cytoscape serialization additionally
-     * surfaces {@code log10Weight} on each edge so fcose's
+     * surfaces {@code logWeight} on each edge so fcose's
      * {@code idealEdgeLength} can use a logarithmically-scaled edge length
      * without doing the math in the browser.</p>
      */
@@ -130,7 +130,7 @@ public class SampleGraphController {
                 Map<String, Object> props = new LinkedHashMap<>();
                 if (hasWeight) {
                     // Store the raw weight; the Cytoscape serializer will
-                    // surface a pre-computed log10Weight next to it.
+                    // surface a pre-computed logWeight next to it.
                     props.put(GraphRelationship.PROP_WEIGHT, weight);
                 }
                 rels.add(new GraphRelationship(relId, "REL", s, t, props));
@@ -167,18 +167,18 @@ private JsonObject toJson(GraphData data) {
 // between two connected nodes — higher weight ⇒ the two endpoints should
 // be pulled closer together in the layout (shorter edge). The
 // {@code idealEdgeLength} formula scales inversely with the per-edge
-// {@code log10Weight}: edges with strong weights get shorter ideal
-// lengths, edges with weak weights get longer ones.
+// {@code logWeight}: edges with strong weights get shorter ideal
+//   lengths, edges with weak weights get longer ones.
 //
-//   weight   log10Weight   idealEdgeLength
-//   ------   -----------   ----------------
-//   1        0             500 px
-//   10       1             167 px
-//   100      2              83 px
-//   1000     3              50 px
-//   10000    4              33 px
+//   weight   logWeight   idealEdgeLength
+//   ------   ---------   ----------------
+//   1        0.693       500 px
+//   10       2.398       167 px
+//   100      4.615        83 px
+//   1000     6.909        50 px
+//   10000    9.210        33 px
 //
-// Formula: 500 / (1 + 2 * log10Weight)
+// Formula: 500 / (1 + 2 * logWeight)
 //
 // fcose parameters tuned so that the *weighted spring length* shapes the
 // intra-community layout while gravity holds the Leiden-community grid
@@ -213,7 +213,7 @@ private JsonObject toJson(GraphData data) {
 // preseed positions with:
 //   • nodeRepulsion = 12000 — keeps nodes well-separated so the
 //     graph doesn't collapse into a single dense blob.
-//   • idealEdgeLength = 350 / (1 + log10Weight) — strong-weight edges
+//   • idealEdgeLength = 350 / (1 + logWeight) — strong-weight edges
 //     pull their endpoints closer; weak-weight edges let them spread.
 //   • gravity = 0.05 — very weak, lets nodes spread by spring + repulsion.
 //   • edgeElasticity = 0.45 (fcose default).
@@ -229,7 +229,7 @@ fcoseOpts.addProperty("name", "fcose");
 fcoseOpts.addProperty("randomize", false);
 fcoseOpts.addProperty("nodeRepulsion", 12000);
 fcoseOpts.addProperty("idealEdgeLength",
-    "function(e){var lw=e.data('log10Weight');return 350/(1+(typeof lw==='number'?lw:0));}");
+    "function(e){var lw=e.data('logWeight');return 350/(1+(typeof lw==='number'?lw:0));}");
 fcoseOpts.addProperty("edgeElasticity", 0.45);
 fcoseOpts.addProperty("nestingFactor", 0.1);
 fcoseOpts.addProperty("gravity", 0.05);

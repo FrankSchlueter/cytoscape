@@ -56,23 +56,101 @@
             border-top: 1px solid #dddddd;
             margin: 4px 0;
         }
-        /* ----- Color legend (optional) ----- */
-        #cgv-legend {
+        /* ----- Side panel: stacked legend + cluster edges table ----- */
+        #cgv-side-panel {
             position: absolute;
             top: 12px;
             right: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 5000;
+            max-height: 80vh;
+            max-width: 460px;
+        }
+        #cgv-legend {
+            position: relative;
             background: rgba(255,255,255,0.96);
             border: 1px solid #cccccc;
             border-radius: 4px;
             padding: 8px 10px;
             font: 12px "Segoe UI", Arial, sans-serif;
-            z-index: 5000;
-            max-width: 240px;
-            max-height: 70vh;
+            max-width: 280px;
             overflow-y: auto;
             box-shadow: 1px 2px 6px rgba(0,0,0,0.15);
             display: none;
             color: #222;
+        }
+        #cgv-edges {
+            position: relative;
+            background: rgba(255,255,255,0.96);
+            border: 1px solid #cccccc;
+            border-radius: 4px;
+            padding: 8px 10px;
+            font: 12px "Segoe UI", Arial, sans-serif;
+            min-width: 260px;
+            max-width: 440px;
+            overflow-x: auto;
+            box-shadow: 1px 2px 6px rgba(0,0,0,0.15);
+            display: none;
+            color: #222;
+        }
+        #cgv-edges .cgv-edges-header {
+            font-weight: 600;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #dddddd;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        #cgv-edges .cgv-edges-toggle {
+            cursor: pointer;
+            color: #888;
+            font-weight: normal;
+            padding: 0 4px;
+            user-select: none;
+        }
+        #cgv-edges .cgv-edges-toggle:hover {
+            color: #333;
+        }
+        #cgv-edges .cgv-edges-empty {
+            color: #999;
+            font-style: italic;
+            padding: 4px 0;
+        }
+        #cgv-edges table.cgv-edges-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        #cgv-edges table.cgv-edges-table th {
+            background: #f4f4f4;
+            text-align: left;
+            padding: 4px 6px;
+            border-bottom: 1px solid #cccccc;
+            font-weight: 600;
+        }
+        #cgv-edges table.cgv-edges-table td {
+            padding: 3px 6px;
+            border-bottom: 1px solid #eeeeee;
+            word-break: break-word;
+        }
+        #cgv-edges table.cgv-edges-table td.cgv-edge-weight {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
+        #cgv-edges table.cgv-edges-table tr.cgv-edge-intra td {
+            background: rgba(255,255,255,0.6);
+        }
+        #cgv-edges table.cgv-edges-table tr.cgv-edge-bridge td {
+            font-style: italic;
+            color: #555555;
+        }
+        #cgv-edges table.cgv-edges-table tbody tr:hover td {
+            background: #fff3cd;
+            cursor: pointer;
         }
         #cgv-legend .cgv-legend-header {
             font-weight: 600;
@@ -162,13 +240,23 @@
 <div id="cy"></div>
 <div id="error"></div>
 <div id="cgv-context-menu"></div>
-<div id="cgv-legend" aria-label="Color legend">
-    <div class="cgv-legend-header">
-        <span>Legend</span>
-        <span class="cgv-legend-toggle" title="Hide legend">&#x2212;</span>
+<div id="cgv-side-panel">
+    <div id="cgv-legend" aria-label="Color legend">
+        <div class="cgv-legend-header">
+            <span>Legend</span>
+            <span class="cgv-legend-toggle" title="Hide legend">&#x2212;</span>
+        </div>
+        <div class="cgv-legend-body"></div>
+        <div class="cgv-legend-hint" style="display:none"></div>
     </div>
-    <div class="cgv-legend-body"></div>
-    <div class="cgv-legend-hint" style="display:none"></div>
+    <div id="cgv-edges" aria-label="Cluster edges">
+        <div class="cgv-edges-header">
+            <span>Edges</span>
+            <span class="cgv-edges-toggle" title="Hide edges">&#x2212;</span>
+        </div>
+        <div class="cgv-edges-body"></div>
+        <div class="cgv-edges-empty" style="display:none"></div>
+    </div>
 </div>
 
 <script src="/cytoscape/cytoscape-viewer.js"></script>

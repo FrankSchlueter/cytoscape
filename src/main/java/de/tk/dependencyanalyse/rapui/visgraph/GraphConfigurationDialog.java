@@ -4,6 +4,8 @@ import de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig;
 import de.tk.dependencyanalyse.rapui.visgraph.config.TagProperty;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphData;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphNode;
+import de.tk.dependencyanalyse.rapui.visgraph.data.GraphRelationship;
+import de.tk.dependencyanalyse.rapui.visgraph.data.LayoutAlgorithm;
 import de.tk.dependencyanalyse.rapui.visgraph.data.LegendBuilder;
 import de.tk.dependencyanalyse.rapui.visgraph.data.LegendEntry;
 import de.tk.dependencyanalyse.rapui.visgraph.data.Shape;
@@ -123,6 +125,7 @@ public class GraphConfigurationDialog extends Dialog {
     private Label tagHint;
 
     private Button leidenApplyButton;
+    private Combo leidenThresholdCombo;
     private Label leidenStatus;
 
     private Button closeButton;
@@ -327,6 +330,21 @@ public class GraphConfigurationDialog extends Dialog {
                 applyLeidenClustering();
             }
         });
+
+        // Pre-Layout Edge-Filter threshold (Cluster-Layout.md §5).
+        // Edges with ln(weight+1) below the selected value are held back
+        // from fcose and re-added to the canvas after the layout has
+        // settled (cytoscape-viewer.js partitionEdgesForLayout).
+        // 'aus' disables the filter (Status quo).
+        Composite thresholdRow = new Composite(shell, SWT.NONE);
+        thresholdRow.setLayout(new GridLayout(2, false));
+        thresholdRow.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+        Label thresholdLabel = new Label(thresholdRow, SWT.NONE);
+        thresholdLabel.setText("Min. ln(weight+1) fürs Layout:");
+        leidenThresholdCombo = new Combo(thresholdRow, SWT.READ_ONLY | SWT.DROP_DOWN);
+        leidenThresholdCombo.setItems(formatThresholdLabels(ClusterLayoutOptions.THRESHOLD_STUFEN));
+        // Default = 2.0 (index 3) — corresponds to weight ≥ e^2 − 1 ≈ 6.39.
+        leidenThresholdCombo.select(ClusterLayoutOptions.DEFAULT_THRESHOLD_INDEX);
 
         leidenStatus = new Label(shell, SWT.NONE);
         leidenStatus.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
@@ -808,13 +826,84 @@ public class GraphConfigurationDialog extends Dialog {
         }
         viewer.setLeidenClusterColors(colors);
         long distinct = colors.values().stream().distinct().count();
-        leidenStatus.setText("Clustering angewendet: " + distinct + " Communities.");
+
+        // Cytoscape engine: full Cluster-Layout-Strategie (compound-parents
+        // + fcose with log-weighted spring lengths + pre-layout edge-filter)
+        // per Cluster-Layout.md. vis-network has no compound-node semantics,
+        // so we keep the colour map but skip the layout push and tell the
+        // user why.
+        if (engine == GraphEngine.CYTOSCAPE) {
+            double threshold = currentLeidenThreshold();
+            // Count how many edges will pass the filter so the status
+            // message can show "X/Y Edges" and the user understands the
+            // effect of the chosen threshold.
+            int totalEdges = data.getRelationships().size();
+            int passing = countEdgesAboveThreshold(threshold);
+            viewer.setLayoutOptions(
+                    ClusterLayoutOptions.buildFcoseOptions(data, colors, threshold));
+            viewer.setLayout(LayoutAlgorithm.FCOSE);
+            String filterNote;
+            if (threshold <= ClusterLayoutOptions.MIN_LOG_WEIGHT_OFF) {
+                filterNote = "alle " + totalEdges + " Edges im Layout";
+            } else {
+                filterNote = passing + "/" + totalEdges
+                        + " Edges im Layout (≥ ln(w+1)=" + threshold + ")";
+            }
+            leidenStatus.setText("Cluster-Layout aktiv: " + distinct
+                    + " Communities, fcose-Compound-Strategie (Cytoscape, " + filterNote + ").");
+        } else {
+            leidenStatus.setText("Clustering angewendet: " + distinct
+                    + " Communities. Hinweis: Cluster-Layout (Compound-Boxen) ist nur in der"
+                    + " Cytoscape-Engine verfügbar – vis-network nutzt weiterhin die eingefärbten Knoten.");
+        }
+
         // Refresh the legend preview + push it so the panel updates
         // immediately with the new cluster counts and the new colors.
         if (legendEnableCheck != null && legendEnableCheck.getSelection()) {
             rebuildLegendPreview();
             pushLegend();
         }
+    }
+
+    /** Resolve the user-selected threshold from the combo, or the OFF sentinel. */
+    private double currentLeidenThreshold() {
+        if (leidenThresholdCombo == null) return ClusterLayoutOptions.DEFAULT_MIN_LOG_WEIGHT;
+        int idx = leidenThresholdCombo.getSelectionIndex();
+        return ClusterLayoutOptions.thresholdForComboIndex(idx);
+    }
+
+    /**
+     * Count how many relationships carry a {@code logWeight} ≥ {@code threshold}.
+     * Used to display the "X/Y Edges" annotation in the status label so the
+     * user sees the effect of the chosen threshold.
+     *
+     * <p>Mirrors the JS-side {@code partitionEdgesForLayout}: edges without a
+     * weight attribute (logWeight missing) are treated as passing the filter,
+     * matching the Cytoscape-bridge fallback
+     * {@code typeof lw === 'number' && lw > 0}.</p>
+     */
+    private int countEdgesAboveThreshold(double threshold) {
+        if (threshold <= ClusterLayoutOptions.MIN_LOG_WEIGHT_OFF) {
+            return data.getRelationships().size();
+        }
+        int n = 0;
+        for (GraphRelationship r : data.getRelationships()) {
+            // ln(weight+1) — same formula as GraphRelationship.toCytoscapeEdge.
+            Double w = r.getWeight();
+            double lw = (w == null || w <= 0) ? 0.0 : Math.log(w + 1.0);
+            if (lw >= threshold) n++;
+        }
+        return n;
+    }
+
+    /** Format the threshold-combo entries as {@code "ln(w+1) ≥ 2.0"} plus an "aus" sentinel. */
+    private static String[] formatThresholdLabels(List<Double> stufen) {
+        String[] out = new String[stufen.size() + 1];
+        for (int i = 0; i < stufen.size(); i++) {
+            out[i] = "ln(w+1) ≥ " + stufen.get(i);
+        }
+        out[stufen.size()] = "aus (alle Edges im Layout)";
+        return out;
     }
 
     /* ============================================================== */

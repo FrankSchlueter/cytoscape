@@ -86,7 +86,7 @@ public class GraphUploadController {
         fcose.addProperty("randomize", false);
         fcose.addProperty("nodeRepulsion", 12000);
         fcose.addProperty("idealEdgeLength",
-                "function(e){var lw=e.data('log10Weight');return 350/(1+(typeof lw==='number'?lw:0));}");
+                "function(e){var lw=e.data('logWeight');return 350/(1+(typeof lw==='number'?lw:0));}");
         fcose.addProperty("edgeElasticity", 0.45);
         fcose.addProperty("nestingFactor", 0.1);
         fcose.addProperty("gravity", 0.05);

@@ -370,6 +370,250 @@
     }
 
     /**
+     * Inject one Cytoscape compound-parent node per Leiden community into the
+     * flat {@code elements} array and set {@code data.parent} on every member
+     * node. Realises "Compound Nodes (Physische Barrieren)" from
+     * Cluster-Layout.md §1, step 2.
+     *
+     * <p>Cluster parents are emitted as plain Cytoscape nodes with a sentinel
+     * {@code isCluster: true} flag (consumed by {@link clusterCompoundStyle})
+     * and the community colour stored as {@code _color} so the dashed-border
+     * style can pick it up via {@code data(_color)}. Member nodes get
+     * {@code data.parent = 'cluster_<idx>'} which makes fcose treat them as
+     * children of the compound — the layout then actively pushes the parent
+     * boxes apart via {@code gravityCompound} / {@code gravityRangeCompound}.</p>
+     *
+     * <p>No-op when {@code colors} is empty / null. The returned array is a
+     * NEW array — the input is left untouched so callers can cache the raw
+     * payload between runs.</p>
+     */
+    function injectClusterParents(elements, colors) {
+        if (!Array.isArray(elements) || elements.length === 0) return elements;
+        if (!colors || typeof colors !== 'object') return elements;
+        var colorList = Object.keys(colors);
+        if (colorList.length === 0) return elements;
+        // Stable, deterministic colour→cluster-id mapping. Index is the
+        // position in Object.keys() iteration order; matches the Java
+        // helper ClusterLayoutOptions.clusterParentId(idx).
+        var clusterIds = {};
+        colorList.forEach(function (color, idx) {
+            clusterIds[color] = 'cluster_' + idx;
+        });
+        var injected = [];
+        var seenClusters = {};
+        for (var i = 0; i < elements.length; i++) {
+            var e = elements[i];
+            var data = (e && e.data) || {};
+            var id = data.id;
+            var color = id ? colors[id] : null;
+            if (color && clusterIds[color]) {
+                var cid = clusterIds[color];
+                if (!seenClusters[cid]) {
+                    seenClusters[cid] = true;
+                    injected.push({
+                        data: {
+                            id: cid,
+                            isCluster: true,
+                            _color: color,
+                            label: '',
+                            // Cytoscape compound parents are children of the
+                            // root, never nested under another parent.
+                            parent: undefined
+                        }
+                    });
+                }
+                // Clone the element so we don't mutate the input list.
+                var cloned = { data: Object.assign({}, data, { parent: cid }) };
+                if (e.position) cloned.position = e.position;
+                injected.push(cloned);
+            } else {
+                injected.push(e);
+            }
+        }
+        log('injectClusterParents: ' + Object.keys(seenClusters).length
+                + ' compound parents injected for ' + colorList.length + ' colors');
+        return injected;
+    }
+
+    /**
+     * Cytoscape style rule(s) for the compound-cluster parent nodes
+     * produced by {@link injectClusterParents}. Implements
+     * Cluster-Layout.md §4 — the cluster container gets a very faint
+     * background fill, a dashed border in the community colour, generous
+     * padding so the spring forces leave room between member nodes and
+     * the box edge, and a suppressed label.
+     *
+     * <p>This entry must be appended AFTER the defaults in
+     * {@code defaultStyle()} so the {@code node[?isCluster]} selector wins
+     * over the generic {@code node} rule.</p>
+     */
+    function clusterCompoundStyle() {
+        return { selector: 'node[?isCluster]',
+            style: {
+                'shape': 'round-rectangle',
+                'background-color': 'data(_color)',
+                'background-opacity': 0.06,
+                'border-width': 2,
+                'border-color': 'data(_color)',
+                'border-style': 'dashed',
+                'padding': '30px',
+                'label': '',
+                'text-events': 'no',
+                // Compound parents are layout-only; disable picking.
+                'events': 'no',
+                'min-width': 80,
+                'min-height': 60
+            }};
+    }
+
+    /**
+     * Cytoscape style overrides for edges when the Cluster-Layout-Strategie
+     * is active. Bezier curves + control-point-step-size spread parallel /
+     * bidirectional edges so they don't overlap; width scales sub-linearly
+     * with the pre-computed {@code logWeight} Cytoscape attribute so the
+     * difference between weight 1 (lw ≈ 0.69) and weight 10000 (lw ≈ 9.21)
+     * is visible without making the heavy edges overwhelming.
+     *
+     * <p>The formula is {@code 0.6 + 0.9 * sqrt(min(max(lw, 0), 4))} →
+     * range 0.6 px (lw=0) to 2.4 px (lw=4). Higher weights are clamped to
+     * lw=4 so the bridge edges (the heaviest) don't dominate the canvas.</p>
+     *
+     * <p>Cytoscape's LAST-matching-rule semantics guarantee this wins over
+     * the {@code edge} rule from {@code defaultStyle()} as long as the
+     * caller appends it AFTER the defaults.</p>
+     */
+    function clusterEdgeStyle() {
+        return { selector: 'edge',
+            style: {
+                'curve-style': 'bezier',
+                'control-point-step-size': 45,
+                'target-arrow-shape': 'triangle',
+                'line-color': '#A2B1C6',
+                'target-arrow-color': '#A2B1C6',
+                'opacity': 0.8,
+                'width': 'function(edge){var lw=edge.data("logWeight");lw=typeof lw==="number"&&lw>0?lw:0;return 0.6+0.9*Math.sqrt(Math.min(Math.max(lw,0),4));}'
+            }};
+    }
+
+    /**
+     * Returns {@code true} when the currently pending layout options carry
+     * the Cluster-Layout-Strategie signature (the compound-cluster forces
+     * from {@code ClusterLayoutOptions.buildFcoseOptions}). The cytoscape
+     * bridge uses this to decide whether to preseed community centers and
+     * merge {@link clusterCompoundStyle} into the stylesheet.
+     */
+    function isClusterLayoutActive() {
+        var opts = pendingLayoutOptions || {};
+        return typeof opts.gravityCompound === 'number'
+                && typeof opts.gravityRangeCompound === 'number'
+                && typeof opts.idealInterClusterEdgeLength === 'number';
+    }
+
+    /**
+     * Returns the array of style rules that should be merged into the
+     * stylesheet when the Cluster-Layout-Strategie is active. Returns an
+     * empty array when no cluster-layout options are pending so callers
+     * can append unconditionally.
+     *
+     * <p>Order matters: cluster edge rules go BEFORE
+     * {@link clusterCompoundStyle} so the dashed-border / padding / fill
+     * of the compound parents win (Cytoscape applies the LAST matching
+     * rule). {@link imageNodeStyle} still comes last from the caller's
+     * side so SVG badges always render.</p>
+     */
+    function clusterStyleRules() {
+        if (!isClusterLayoutActive()) return [];
+        return [clusterEdgeStyle(), clusterCompoundStyle()];
+    }
+
+    /**
+     * Module-level queue of edges that were held back from the initial
+     * {@code cy.add()} call because their {@code logWeight} fell below the
+     * user-selected threshold. Restored to the canvas once the layout has
+     * stopped (see {@link restoreHeldBackEdges}).
+     *
+     * <p>Cluster-Layout.md §5 ("Profi-Tricks"): "Berechnen Sie das
+     * fCoSE-Layout ausschließlich mit Kanten, die ein logarithmisches
+     * Gewicht von über z.B. 4.0 haben. Fügen Sie die sehr schwachen
+     * Kanten (1 bis 50 im Echtwert) erst visuell hinzu, nachdem das
+     * Layout fertig berechnet ist (layout.run())."</p>
+     */
+    var pendingHeldBackEdges = [];
+
+    /**
+     * Read the user-selected pre-layout threshold from the pending layout
+     * options. Returns 0 (filter disabled) when the value is missing,
+     * non-positive, or not a number. The default comes from the Java
+     * helper {@code ClusterLayoutOptions.DEFAULT_MIN_LOG_WEIGHT = 2.0}.
+     */
+    function prefilterMinLogWeight() {
+        var opts = pendingLayoutOptions || {};
+        var v = opts.prefilterMinLogWeight;
+        if (typeof v !== 'number' || v <= 0) return 0;
+        return v;
+    }
+
+    /**
+     * Partition an elements array into edges that should participate in
+     * the layout (above the threshold) and edges that should be held back
+     * until after the layout has settled (below the threshold).
+     *
+     * <p>Edges without a numeric {@code data.logWeight} (i.e. no weight
+     * property at all) are routed into {@code layoutEdges} so unweighted
+     * relationships don't disappear — the Java fcose function string falls
+     * back to {@code 1} for those, matching the {@code (typeof lw === 'number' && lw > 0)}
+     * guard in {@code ClusterLayoutOptions.edgeElasticity}.</p>
+     *
+     * <p>Edges below the threshold are NOT removed — they're stashed in
+     * {@link pendingHeldBackEdges} so {@link restoreHeldBackEdges} can
+     * add them back to the canvas once the layout has placed the nodes.</p>
+     */
+    function partitionEdgesForLayout(elements, minLogWeight) {
+        pendingHeldBackEdges = [];
+        if (!Array.isArray(elements)) return elements || [];
+        if (typeof minLogWeight !== 'number' || minLogWeight <= 0) return elements;
+        var layoutEdges = [];
+        for (var i = 0; i < elements.length; i++) {
+            var e = elements[i];
+            var data = (e && e.data) || {};
+            // Skip compound-parent nodes and member nodes — the filter
+            // applies to edges (source/target pairs) only.
+            if (!data.source || !data.target) {
+                layoutEdges.push(e);
+                continue;
+            }
+            var lw = data.logWeight;
+            if (typeof lw === 'number' && lw > 0 && lw < minLogWeight) {
+                pendingHeldBackEdges.push(e);
+            } else {
+                layoutEdges.push(e);
+            }
+        }
+        log('partitionEdgesForLayout: kept ' + layoutEdges.length
+                + ' edges for layout, held back ' + pendingHeldBackEdges.length
+                + ' (threshold=' + minLogWeight + ')');
+        return layoutEdges;
+    }
+
+    /**
+     * Add the held-back edges back to the canvas. Safe to call multiple
+     * times — the internal queue is cleared after every successful pass.
+     * Called from the {@code layout.on('layoutstop', ...)} handler in
+     * {@link runPostLoadLayout} and from {@link runLayout}'s fcose branch.
+     */
+    function restoreHeldBackEdges() {
+        if (!cy || !pendingHeldBackEdges || pendingHeldBackEdges.length === 0) return;
+        var held = pendingHeldBackEdges;
+        pendingHeldBackEdges = [];
+        try {
+            cy.batch(function () { cy.add(held); });
+            log('restoreHeldBackEdges: re-added ' + held.length + ' weak edges after layout');
+        } catch (e) {
+            log('restoreHeldBackEdges: failed to add ' + held.length + ' edges: ' + e.message);
+        }
+    }
+
+    /**
      * Preload every node's {@code data.image} (a data:image/svg+xml URI) into
      * a browser Image object, then force Cytoscape to redraw once the load
      * events fire.
@@ -429,9 +673,27 @@
                 var mappedLayout = mapLayoutName(currentLayout);
                 if (mappedLayout !== 'preset') {
                     setTimeout(function () {
-                        runLayout(currentLayout, pendingLayoutOptions);
+                        // For the Cluster-Layout-Strategie, fcose must run
+                        // with randomize=false so the preseeded cluster
+                        // centres AND the compound-parent barriers stick.
+                        // The Java helper sets randomize=true by default
+                        // (so fcose genuinely uses the compound parents as
+                        // physical barriers), but we force it back to
+                        // false here so the preseeded positions are not
+                        // discarded.
+                        var opts = pendingLayoutOptions || {};
+                        if (isClusterLayoutActive()) {
+                            opts = Object.assign({}, opts, { randomize: false });
+                        }
+                        runLayout(currentLayout, opts);
                     }, 50);
+                    // The held-back edges will be restored by runLayout's
+                    // own 'layoutstop' handler once fcose settles.
                 } else {
+                    // 'preset' was the final layout — restore the held-back
+                    // edges NOW because there is no fcose layoutstop to
+                    // trigger restoreHeldBackEdges() automatically.
+                    restoreHeldBackEdges();
                     try {
                         var nodes = cy.nodes();
                         if (nodes.length > 0) {
@@ -494,6 +756,23 @@
         if (activeLegendColor) {
             activeLegendColor = null;
             renderLegendPanel();
+        }
+        // Cluster-Layout-Strategie: when a Leiden colour map is present
+        // AND the cluster-layout options are pending, splice one
+        // compound-parent node per community into the elements array and
+        // set data.parent on every member node. fcose then treats the
+        // parents as physical barriers (Cluster-Layout.md §1, step 2).
+        if (leidenColors && isClusterLayoutActive()) {
+            elements = injectClusterParents(elements || [], leidenColors);
+        }
+        // Pre-Layout Edge-Filter (Cluster-Layout.md §5): hold weak
+        // edges back from cy.add() so fcose sees a leaner graph. The
+        // held-back edges are re-added by restoreHeldBackEdges() once
+        // the layout has stopped. Skipped when the threshold is missing
+        // or non-positive — that matches the Java helper's OFF sentinel.
+        var prefilter = prefilterMinLogWeight();
+        if (prefilter > 0) {
+            elements = partitionEdgesForLayout(elements, prefilter);
         }
         try {
             cy.batch(function () {
@@ -597,6 +876,13 @@
             layout.on('layoutstop', function () {
                 log('layoutstop: ' + layoutName);
                 debugStatus('layoutstop: ' + layoutName + ', nodes=' + cy.nodes().length);
+                // Cluster-Layout.md §5: re-add weak edges that were held
+                // back from cy.add() so fcose could compute the cluster
+                // skeleton without noise. The nodes already have their
+                // final positions at this point, so the restored edges
+                // render between the right endpoints without distorting
+                // the layout.
+                restoreHeldBackEdges();
                 // Force-fit to viewport after layout completes.
                 try { cy.fit(undefined, 30); } catch (e) { /* ignore */ }
             });
@@ -615,6 +901,9 @@
                 try {
                     var fb = cy.layout({ name: 'preset', fit: true, padding: 30, animate: false });
                     fb.on('layoutstop', function () {
+                        // Fallback layout may have lost the original
+                        // held-back edges; restore them before fit.
+                        restoreHeldBackEdges();
                         try { cy.fit(undefined, 30); } catch (e) { /* ignore */ }
                     });
                     fb.run();
@@ -951,6 +1240,11 @@
                 }
             });
         });
+        // Cluster-Edges-Tabelle mit den gematchten Edges befüllen —
+        // muss NACH dem cy.batch() laufen, damit die gematchten
+        // Node-Styles (und damit die normalizeColor-Treffer im Panel)
+        // bereits committed sind.
+        renderEdgesTable(hex);
     }
 
     /**
@@ -994,6 +1288,11 @@
      */
     function clearLegendHighlight() {
         activeLegendColor = null;
+        // Cluster-Edges-Tabelle verschwindet, sobald das Highlight gelöscht
+        // wird (zweiter Click, Background-Tap, Legend-Disable). Wird vor
+        // dem cy.style().update() aufgerufen, damit der Tabellen-Render
+        // nicht mitten im Style-Refresh passiert.
+        hideEdgesTable();
         if (!cy) return;
         cy.batch(function () {
             cy.elements().removeStyle(
@@ -1001,6 +1300,161 @@
             );
         });
         cy.style().update();
+    }
+
+    /* ---- Cluster-Edges-Tabelle ---- */
+
+    /**
+     * Resolve a Cytoscape node id to a human-readable display name for the
+     * edges table. Priority: {@code data.label} (set by
+     * {@code GraphNode.toCytoscapeNode()} from {@code visualAttrs.label} /
+     * {@code getCaption()}) → {@code data.name} → node id.
+     */
+    function displayNameFor(nodeId) {
+        var n = cy.getElementById(nodeId);
+        if (n && n.length > 0) {
+            var lbl = n.data('label');
+            if (lbl != null && String(lbl).length > 0) return String(lbl);
+            var name = n.data('name');
+            if (name != null && String(name).length > 0) return String(name);
+        }
+        return nodeId;
+    }
+
+    /**
+     * Format an edge weight for the {@code Weight} column. Large values
+     * are rounded to integers to keep the column compact; small values
+     * stay as-is. {@code null}/missing returns an empty string.
+     */
+    function formatWeight(w) {
+        if (w == null) return '';
+        var n = typeof w === 'number' ? w : parseFloat(w);
+        if (isNaN(n)) return String(w);
+        if (Math.abs(n) >= 100) return String(Math.round(n));
+        if (Math.abs(n) >= 10) return n.toFixed(1);
+        return n.toString();
+    }
+
+    /**
+     * Build (or rebuild) the cluster-edges table for the currently
+     * highlighted hex color. Populates the {@code #cgv-edges} panel with
+     * one {@code <tr>} per edge touching at least one matched node:
+     * intra-cluster edges first (sorted by weight desc), then bridge
+     * edges (sorted by weight desc). Intra vs. bridge is conveyed via
+     * the {@code cgv-edge-intra} / {@code cgv-edge-bridge} CSS classes.
+     *
+     * <p>Safe to call when no nodes are matched — the empty-state hint
+     * is shown instead.</p>
+     */
+    function renderEdgesTable(hex) {
+        var panel = document.getElementById('cgv-edges');
+        if (!panel) return;
+        var body = panel.querySelector('.cgv-edges-body');
+        var empty = panel.querySelector('.cgv-edges-empty');
+        if (!body || !empty || !cy) {
+            panel.style.display = 'none';
+            return;
+        }
+        var target = normalizeColor(hex);
+        // 1) Sammle alle Cluster-Members.
+        var matched = {};
+        cy.nodes().forEach(function (n) {
+            var bg = n.style('background-color');
+            if (bg && normalizeColor(bg) === target) matched[n.id()] = true;
+        });
+        // 2) Sammle alle Edges, die mindestens einen Cluster-Member haben.
+        var rows = [];
+        cy.edges().forEach(function (e) {
+            var sId = e.source().id();
+            var tId = e.target().id();
+            var sMatched = !!matched[sId];
+            var tMatched = !!matched[tId];
+            if (!sMatched && !tMatched) return;
+            rows.push({
+                edgeId: e.id(),
+                fromId: sId,
+                fromLabel: displayNameFor(sId),
+                toId: tId,
+                toLabel: displayNameFor(tId),
+                weight: e.data('weight'),
+                intraCluster: sMatched && tMatched
+            });
+        });
+        // 3) Sortierung: Intra-Cluster zuerst, dann Weight desc.
+        rows.sort(function (a, b) {
+            if (a.intraCluster !== b.intraCluster) return a.intraCluster ? -1 : 1;
+            return (b.weight || 0) - (a.weight || 0);
+        });
+        body.innerHTML = '';
+        if (rows.length === 0) {
+            empty.textContent = 'Keine Edges im Cluster.';
+            empty.style.display = 'block';
+            panel.style.display = 'block';
+            return;
+        }
+        empty.style.display = 'none';
+        // 4) Tabelle aufbauen.
+        var table = document.createElement('table');
+        table.className = 'cgv-edges-table';
+        var thead = document.createElement('thead');
+        thead.innerHTML = '<tr><th>From</th><th>Weight</th><th>To</th></tr>';
+        table.appendChild(thead);
+        var tbody = document.createElement('tbody');
+        rows.forEach(function (r) {
+            var tr = document.createElement('tr');
+            tr.dataset.edgeId = r.edgeId;
+            tr.title = r.edgeId;
+            tr.className = r.intraCluster ? 'cgv-edge-intra' : 'cgv-edge-bridge';
+            var fromTd = document.createElement('td');
+            fromTd.className = 'cgv-edge-from';
+            fromTd.textContent = r.fromLabel;
+            var weightTd = document.createElement('td');
+            weightTd.className = 'cgv-edge-weight';
+            weightTd.textContent = formatWeight(r.weight);
+            var toTd = document.createElement('td');
+            toTd.className = 'cgv-edge-to';
+            toTd.textContent = r.toLabel;
+            tr.appendChild(fromTd);
+            tr.appendChild(weightTd);
+            tr.appendChild(toTd);
+            tr.addEventListener('click', function (evt) {
+                onEdgeRowClick(r.edgeId, evt);
+            });
+            tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        body.appendChild(table);
+        panel.style.display = 'block';
+    }
+
+    /**
+     * Hide the cluster-edges table and clear its body. Idempotent; safe
+     * to call when the panel is already hidden.
+     */
+    function hideEdgesTable() {
+        var panel = document.getElementById('cgv-edges');
+        if (!panel) return;
+        panel.style.display = 'none';
+        var body = panel.querySelector('.cgv-edges-body');
+        if (body) body.innerHTML = '';
+        var empty = panel.querySelector('.cgv-edges-empty');
+        if (empty) empty.style.display = 'none';
+    }
+
+    /**
+     * Row-Click-Handler. Triggert den Java-`relListeners`-Callback, indem
+     * die Cytoscape-Selection auf das entsprechende Edge gesetzt wird —
+     * der bestehende {@code cy.on('tap', 'edge', …)}-Listener ruft dann
+     * seinerseits {@code javaCall('cgv_notifyRelationshipSelected', …)}
+     * auf. Kein neuer Java-Bridge-Code nötig.
+     */
+    function onEdgeRowClick(edgeId, evt) {
+        if (evt) evt.stopPropagation();
+        if (!cy) return;
+        var edge = cy.getElementById(edgeId);
+        if (!edge || edge.length === 0) return;
+        cy.elements().unselect();
+        edge.select();
     }
 
     /* ---- Java-callable API (window.cgv_*) ---- */
@@ -1082,9 +1536,15 @@
                             // Append imageNodeStyle() AFTER the Leiden
                             // overrides so image-badges win back their
                             // SVG rendering (Cytoscape applies the LAST
-                            // matching rule).
+                            // matching rule). clusterStyleRules() (when
+                            // active) sits BETWEEN styles and imageNode
+                            // so the compound-parent dashed border wins
+                            // over the Leiden per-node background-color.
                             var defaults = defaultStyle();
-                            var merged = defaults.concat(styles).concat([imageNodeStyle()]);
+                            var merged = defaults
+                                .concat(styles)
+                                .concat(clusterStyleRules())
+                                .concat([imageNodeStyle()]);
                             cy.style().fromJson(merged).update();
                             // Rebuild texture cache so SVG badges paint
                             // with the (possibly new) Leiden background
@@ -1127,7 +1587,10 @@
         var style = buildStyleFromConfig(config || {});
         // Append imageNodeStyle() AFTER user-config overrides so image-badge
         // nodes always render their SVG (Cytoscape applies the LAST matching
-        // style selector).
+        // style selector). clusterStyleRules() (when cluster layout is
+        // active) sits BETWEEN user-config and imageNode so the compound
+        // parent rules win over any per-node background-color override.
+        style = style.concat(clusterStyleRules());
         style.push(imageNodeStyle());
         cy.style().fromJson(style).update();
         // Re-preload SVG badges — replacing the stylesheet rebuilds the
@@ -1437,9 +1900,15 @@
             // Only add defaults that aren't already in the new styles.
             // Cytoscape applies the LAST matching style, so the Leiden
             // colors need to come AFTER the defaults in the array.
+            // clusterStyleRules() (when active) sits BETWEEN the per-node
+            // Leiden background-colors and imageNodeStyle() so the
+            // compound-parent dashed border wins over the Leiden fill.
             // imageNodeStyle() comes LAST so image-badge nodes still
             // render their SVG even when Leiden set background-color.
-            var merged = defaults.concat(styles).concat([imageNodeStyle()]);
+            var merged = defaults
+                .concat(styles)
+                .concat(clusterStyleRules())
+                .concat([imageNodeStyle()]);
             cy.style().fromJson(merged).update();
             // Rebuild the texture cache for SVG badges — see
             // preloadSvgImagesAndRedraw in applyElements for the rationale.
