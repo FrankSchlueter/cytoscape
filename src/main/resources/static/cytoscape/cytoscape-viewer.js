@@ -29,6 +29,11 @@
     var pendingLayoutOptions = null;
     var pendingElements = null;
     var cyReady = false;
+    // True between attempt() finding a non-zero container and the
+    // boot() body having set cyReady = true. Prevents two
+    // ResizeObserver / setInterval callbacks from racing each other
+    // into double-boot during the FillLayout flush.
+    var booting = false;
     var leidenColors = null;
     var resizeObserved = false;
     // Legend state
@@ -80,6 +85,10 @@
     }
 
     function init() {
+        // Idempotency guard: a second init() (e.g. after window resize
+        // or an engine-switch that fires setText twice) must not
+        // re-init cytoscape on top of an existing instance.
+        if (cyReady || booting) return;
         log('init() start');
         var container = $('cy');
         if (!container) {
@@ -119,6 +128,23 @@
                         boot(container);
                     }
                 }, 100);
+                // Hard timeout: after 5 s the container might still be 0×0
+                // because the parent composite's layout never propagated.
+                // Surface a clear error in the #cgv-debug banner so the
+                // user isn't left staring at an empty canvas wondering
+                // why nothing rendered.
+                setTimeout(function () {
+                    if (cyReady || booting) return;
+                    if (container.clientWidth > 0 && container.clientHeight > 0) {
+                        boot(container);
+                        return;
+                    }
+                    var dbg = $('cgv-debug');
+                    if (dbg) {
+                        dbg.style.display = 'block';
+                        dbg.textContent = 'Container size 0×0 — cytoscape boot timed out';
+                    }
+                }, 5000);
             } else {
                 var interval = setInterval(function () {
                     if (container.clientWidth > 0 && container.clientHeight > 0) {
@@ -132,10 +158,41 @@
     }
 
     function boot(container) {
+        // Guard against double-boot: ResizeObserver + setInterval can
+        // both fire on the same size transition, and the attempt() /
+        // setTimeout paths can race if the polling interval hasn't been
+        // cleared yet.
+        if (cyReady || booting) return;
+        booting = true;
         log('boot() enter');
+        try {
+            doBoot(container);
+        } catch (outerEx) {
+            // doBoot() catches its own errors and clears booting, but
+            // belt-and-suspenders: if anything escapes (e.g. a thrown
+            // exception in a listener registered inside doBoot), clear
+            // booting so a subsequent ResizeObserver / setTimeout can
+            // retry instead of leaving the viewer permanently dead.
+            log('boot() caught outer exception: ' + outerEx.message);
+            booting = false;
+            throw outerEx;
+        }
+    }
+
+    /**
+     * Actual boot body, wrapped in {@link boot} so the {@code booting}
+     * flag is reset on every failure path. Without this reset, a
+     * single boot failure (e.g. cytoscape throwing in its constructor,
+     * or the cytoscape.use(fcose) call blowing up on an exotic bundle
+     * layout) would permanently brick the viewer — every subsequent
+     * ResizeObserver / setInterval / setTimeout call would bail at
+     * the {@code if (cyReady || booting) return;} guard.
+     */
+    function doBoot(container) {
         if (typeof cytoscape === 'undefined') {
             showError('Cytoscape library not loaded — check /cytoscape/cytoscape.min.js');
             javaCall('cgv_viewerReady');
+            booting = false;
             return;
         }
         // The cytoscape-fcose UMD bundle registers itself automatically on
@@ -170,8 +227,23 @@
                 elements: [],
                 style: defaultStyle().concat([imageNodeStyle()]),
                 layout: { name: 'preset' },
-                wheelSensitivity: 0.2,
-                minZoom: 0.1,
+                // wheelSensitivity intentionally NOT set — Cytoscape's
+                // default (= 1) lets the browser's native wheel-zoom
+                // semantics drive the pan/zoom, which feels natural on
+                // every mouse + OS combo. Setting it to a small value
+                // (e.g. 0.2) makes the canvas zoom 5× more aggressively
+                // than the user expects, and Cytoscape logs a console
+                // warning about exactly that ("You have set a custom
+                // wheel sensitivity. This will make your app zoom
+                // unnaturally when using mainstream mice."). Our earlier
+                // 0.2 setting also caused the "zoom away and it
+                // disappears" symptom — at 0.2 sensitivity one scroll
+                // tick is enough to push the zoom past minZoom.
+                // minZoom: 0.25 keeps the graph visible even at the
+                // extreme-out end (smaller values lose the silhouette),
+                // maxZoom: 5 leaves room for inspecting individual
+                // node badges without breaking the layout.
+                minZoom: 0.25,
                 maxZoom: 5
             });
             // Expose for debugging / test harnesses. Production users
@@ -182,6 +254,7 @@
             showError('Cytoscape init failed: ' + e.message);
             console.error(e);
             javaCall('cgv_viewerReady');
+            booting = false;
             return;
         }
 
@@ -190,9 +263,41 @@
         // against a 0x0 viewport and the layout collapses to a point.
         try { cy.resize(); } catch (e) { /* ignore */ }
 
+        // Register the runtime classes that replace inline-style highlights
+        // throughout the viewer. Class-based styles are stored once on
+        // the stylesheet and applied via addClass/removeClass — Cytoscape
+        // then re-renders the affected elements in a single layer-cache
+        // pass, eliminating the flicker we saw when highlightNeighborhood
+        // toggled `opacity` per element via n.style({...}). The selectors
+        // themselves live on the cy.style() chain so the rule is honoured
+        // even when our caller overrides the default node rule.
+        try {
+            cy.style()
+                .selector('.cgv-faded')
+                .style({ 'opacity': 0.18 })
+                .selector('.cgv-highlighted')
+                .style({
+                    'border-width': 4,
+                    'border-style': 'solid',
+                    'border-color': '#E74C3C',
+                    'opacity': 1
+                })
+                .selector('node.cgv-node-hover')
+                .style({
+                    'border-color': '#4A90E2',
+                    'border-width': 3
+                })
+                .update();
+        } catch (e) { /* ignore — selector rule registration is best-effort */ }
+
         wireCytoscapeEvents(cy);
         attachTooltips(cy);
         cyReady = true;
+        // Boot succeeded — clear the booting flag so a subsequent engine
+        // switch can re-enter boot(). (cyReady alone is enough to block
+        // re-boot, but we leave booting consistent with cyReady for any
+        // future code path that checks it independently.)
+        booting = false;
 
         // If elements arrived before the boot, apply them now.
         if (pendingElements && pendingElements.length > 0) {
@@ -234,7 +339,7 @@
               }},
             { selector: 'edge',
               style: {
-                  'width': 1.5,
+                  'width': 2,
                   'line-color': '#888888',
                   'target-arrow-color': '#888888',
                   'target-arrow-shape': 'triangle',
@@ -656,16 +761,108 @@
         // SVG data URIs have finished parsing.
         function runPostLoadLayout() {
             try {
+                // Cytoscape draws nothing into a 0×0 canvas. Even with the
+                // log-coordinate clamp the user sees a blank graph because
+                // the render-area itself is empty. We MUST wait for a
+                // positive container size before placing nodes and
+                // running the layout. ResizeObserver fires the moment
+                // the iframe container's FillLayout settles; setInterval
+                // is the fallback for environments without ResizeObserver
+                // (very old webviews). Hard timeout 5 s is the last
+                // resort — surface a clear error in #cgv-debug.
+                var cyContainer = document.getElementById('cy');
+                var ready = function () {
+                    return cyContainer &&
+                        cyContainer.clientWidth > 0 &&
+                        cyContainer.clientHeight > 0;
+                };
+                var doLayout = function () {
+                    runPostLoadLayoutBody();
+                };
+                if (ready()) {
+                    doLayout();
+                    return;
+                }
+                log('postLoad: container still 0×0, waiting for ResizeObserver');
+                if (typeof ResizeObserver !== 'undefined') {
+                    var ro = new ResizeObserver(function () {
+                        if (ready()) {
+                            ro.disconnect();
+                            doLayout();
+                        }
+                    });
+                    ro.observe(cyContainer);
+                    setTimeout(function () {
+                        ro.disconnect();
+                        if (ready()) { doLayout(); return; }
+                        var dbg = document.getElementById('cgv-debug');
+                        if (dbg) {
+                            dbg.style.display = 'block';
+                            dbg.textContent = 'Cytoscape: container size 0×0 after 5 s — aborting layout';
+                        }
+                        log('postLoad: container 0×0 after 5 s, aborting layout');
+                    }, 5000);
+                } else {
+                    var pollCount = 0;
+                    var poll = setInterval(function () {
+                        pollCount++;
+                        if (ready()) {
+                            clearInterval(poll);
+                            doLayout();
+                        } else if (pollCount > 50) {
+                            clearInterval(poll);
+                            log('postLoad: container 0×0 after 5 s, forcing layout');
+                            doLayout();
+                        }
+                    }, 100);
+                }
+            } catch (e) {
+                log('postLoad: setup failed: ' + e.message);
+                try { runPostLoadLayoutBody(); } catch (e2) { /* ignore */ }
+            }
+        }
+
+        /**
+         * The actual layout body, extracted from {@link runPostLoadLayout}
+         * so the latter can wait for a positive container size before
+         * placing nodes and running fcose. See the doc-comment on
+         * {@code runPostLoadLayout} for why this matters.
+         */
+        function runPostLoadLayoutBody() {
+            try {
+                // Force a fresh resize right before we touch positions —
+                // the very first runPostLoadLayout() often fires while
+                // the iframe has just been (re)attached to the composite
+                // and the container has not yet propagated its size
+                // through Cytoscape's internal viewport tracking.
+                // Without this, cy.width()/cy.height() return 0 and the
+                // circle-preset branch lands every node on (0,0) — the
+                // graph renders blank because all elements occupy the
+                // same pixel.
+                try { cy.resize(); } catch (e) { /* ignore */ }
+                // Pin the layout viewport to a sane minimum even if the
+                // iframe is still mid-resize: 600×400 is large enough
+                // for a 1010-edge graph to spread out, and small enough
+                // that Math.cos(angle) * Math.min(w, h) * 0.35 stays in
+                // the safe integer range. Without the clamp, a 0×0
+                // container returns NaN coordinates that Cytoscape then
+                // refuses to draw.
+                var vw = Math.max(cy.width() || 0, 600);
+                var vh = Math.max(cy.height() || 0, 400);
                 var preseed = leidenColors && preseedCommunityPositions(leidenColors);
                 if (preseed) {
-                    log('postLoad: community preset applied, kicking off fcose async');
+                    log('postLoad: community preset applied, kicking off off fcose async');
                 } else {
                     log('postLoad: no community map, falling back to circle preset');
+                    var radius = Math.min(vw, vh) * 0.35;
+                    var cx = vw / 2;
+                    var cyc = vh / 2;
+                    var total = cy.nodes().length;
                     cy.nodes().forEach(function (n, i) {
-                        var angle = (i / cy.nodes().length) * Math.PI * 2;
+                        var angle = total > 0 ? (i / total) * Math.PI * 2 : 0;
                         n.position({
-                            x: cy.width() / 2 + Math.cos(angle) * Math.min(cy.width(), cy.height()) * 0.35,
-                            y: cy.height() / 2 + Math.sin(angle) * Math.min(cy.width(), cy.height()) * 0.35,
+                            x: cx + Math.cos(angle) * radius,
+                            y: cyc + Math.sin(angle) * radius
                         });
                     });
                 }
@@ -971,17 +1168,16 @@
         cy.on('mouseover', 'node[?image]', function (evt) {
             var n = evt.target;
             if (!n || n.grabbed() || n.selected()) return;
-            n.style({
-                'border-color': '#4A90E2',
-                'border-width': 3
-            });
+            // Class-based hover so the style is computed once on the
+            // stylesheet (see cgv-node-hover rule registered in boot()).
+            // Removing the inline-border override on mouseout lets the
+            // stylesheet rule reassert itself.
+            n.addClass('cgv-node-hover');
         });
         cy.on('mouseout', 'node[?image]', function (evt) {
             var n = evt.target;
             if (!n) return;
-            // Removing the inline overrides lets the stylesheet rule
-            // (imageNodeStyle / node:selected) reassert itself.
-            n.removeStyle('border-color border-width');
+            n.removeClass('cgv-node-hover');
         });
         // Tap on a node:
         //   - if the node is already selected, deselect it (toggle)
@@ -1066,7 +1262,11 @@
         if (!node.neighborhood) return;
         var hood = node.neighborhood().add(node);
         var others = cy.elements().difference(hood);
-        if (others.length > 0) others.style({ 'opacity': 0.18 });
+        // Class-based dimming — Cytoscape computes the opacity once per
+        // frame instead of patching each element's style. Fixes the
+        // "blink on mouse-move" symptom that came from per-element
+        // inline style() calls racing with cy.style().update().
+        if (others.length > 0) others.addClass('cgv-faded');
     }
 
     function highlightEdgeNeighborhood(cy, edge) {
@@ -1074,22 +1274,19 @@
         clearNeighborhoodHighlight(cy);
         var hood = edge.connectedNodes().union(edge);
         var others = cy.elements().difference(hood);
-        if (others.length > 0) others.style({ 'opacity': 0.18 });
+        if (others.length > 0) others.addClass('cgv-faded');
     }
 
     function clearNeighborhoodHighlight(cy) {
         if (!cy) return;
-        // Reset only the inline opacity / border / line-width overrides
-        // we added during highlighting. We deliberately do NOT call
+        // Strip only the runtime class overrides we added during
+        // highlighting. We deliberately do NOT call
         // cy.style().resetToDefault() because that would wipe the
         // node:selected / edge:selected selectors from the stylesheet,
-        // which are the source of the red border highlight.
+        // which are the source of the red selection border highlight.
         cy.batch(function () {
-            cy.elements().removeStyle('opacity border-width border-color border-style line-color target-arrow-color width');
+            cy.elements().removeClass('cgv-faded');
         });
-        // Re-apply the default stylesheet so the :selected selectors
-        // continue to work for the next selection.
-        cy.style().update();
     }
 
     /* ---- Legend panel ---- */
@@ -1215,28 +1412,37 @@
         var matchedSet = {};
         matched.forEach(function (n) { matchedSet[n.id()] = true; });
         cy.batch(function () {
+            // Inline-style the matched-cluster border colour so the legend
+            // hex propagates through, then add the shared 'cgv-faded'
+            // class to non-matching elements. Class-based dimming fixes
+            // the mouse-move blink: Cytoscape caches class styles once
+            // and re-uses them across re-renders, whereas inline
+            // n.style({opacity: …}) calls invalidate the layer cache on
+            // every set.
             nodes.forEach(function (n) {
                 if (matchedSet[n.id()]) {
+                    n.removeClass('cgv-faded');
                     n.style({
                         'border-width': 4,
                         'border-color': hex,
                         'border-style': 'solid'
                     });
                 } else {
-                    n.style({ 'opacity': 0.18 });
+                    n.addClass('cgv-faded');
                 }
             });
             cy.edges().forEach(function (e) {
                 var sId = e.source().id();
                 var tId = e.target().id();
                 if (matchedSet[sId] && matchedSet[tId]) {
+                    e.removeClass('cgv-faded');
                     e.style({
                         'line-color': hex,
                         'target-arrow-color': hex,
                         'opacity': 1
                     });
                 } else {
-                    e.style({ 'opacity': 0.18 });
+                    e.addClass('cgv-faded');
                 }
             });
         });
@@ -1282,24 +1488,27 @@
     }
 
     /**
-     * Remove every inline opacity / border / line-color override we added
-     * during {@link applyLegendHighlight}. The stylesheet's node:selected /
-     * edge:selected rules are preserved by re-applying the stylesheet.
+     * Remove every inline override we added during
+     * {@link applyLegendHighlight}. Class-based fades go via
+     * {@code removeClass} so the stylesheet reasserts itself; per-element
+     * inline-styles (the border-colour set by the active legend entry)
+     * are cleared with {@code removeStyle}. The :selected selectors in
+     * the default stylesheet stay intact because we never call
+     * {@code cy.style().resetToDefault()}.
      */
     function clearLegendHighlight() {
         activeLegendColor = null;
         // Cluster-Edges-Tabelle verschwindet, sobald das Highlight gelöscht
         // wird (zweiter Click, Background-Tap, Legend-Disable). Wird vor
-        // dem cy.style().update() aufgerufen, damit der Tabellen-Render
-        // nicht mitten im Style-Refresh passiert.
+        // dem Style-Reset aufgerufen, damit der Tabellen-Render nicht
+        // mitten im Style-Refresh passiert.
         hideEdgesTable();
         if (!cy) return;
         cy.batch(function () {
-            cy.elements().removeStyle(
-                'opacity border-width border-color border-style line-color target-arrow-color'
-            );
+            cy.elements()
+                .removeClass('cgv-faded')
+                .removeStyle('border-width border-color border-style line-color target-arrow-color');
         });
-        cy.style().update();
     }
 
     /* ---- Cluster-Edges-Tabelle ---- */
@@ -1472,13 +1681,37 @@
 
     /* ---- Java-callable API (window.cgv_*) ---- */
 
+    // Re-entrancy guard: applyElements() runs cy.batch(remove, add) which
+    // can take a moment on a 1010-edge graph. If a second cgv_setData
+    // arrives while the first is mid-flight (e.g. multiple queued
+    // exec() calls fire during the same ResizeObserver flush), the
+    // second applyElements would clobber the in-flight state and leave
+    // the graph half-rendered. Queue the second payload and let the
+    // first call's pending-data path pick it up.
+    var cgvSetDataBusy = false;
+    var cgvSetDataPending = null;
+
     window.cgv_setData = function () {
         log('cgv_setData called, __cgv_elements=' + (window.__cgv_elements ? window.__cgv_elements.length : 'null'));
         if (!window.__cgv_elements) {
             log('cgv_setData: no __cgv_elements yet');
             return;
         }
-        applyElements(window.__cgv_elements);
+        // The first call wins. Capture the payload so a re-entrant call
+        // doesn't drop it — but only the latest payload is kept, so the
+        // canvas only ever ends up reflecting the most recent state.
+        cgvSetDataPending = window.__cgv_elements;
+        if (cgvSetDataBusy) return;
+        cgvSetDataBusy = true;
+        try {
+            while (cgvSetDataPending) {
+                var payload = cgvSetDataPending;
+                cgvSetDataPending = null;
+                applyElements(payload);
+            }
+        } finally {
+            cgvSetDataBusy = false;
+        }
     };
 
     window.cgv_setLayout = function (name) {
@@ -1943,6 +2176,59 @@
 
     window.cgv_applyLegend = function (entries, enabled) {
         applyLegend(entries, enabled);
+    };
+
+    /**
+     * Iframe-side cleanup hook invoked by {@code CytoscapeJsBridge}
+     * just before the Browser widget is disposed (e.g. on an engine
+     * switch to vis-network). Removes the floating tooltip element from
+     * {@code document.body} and clears any pending tooltip state. Without
+     * this the orphan {@code #cgv-tooltip} div survives the iframe
+     * swap and floats on top of the vis-network canvas, looking exactly
+     * like "the graph is gone, only the tooltip is left".
+     */
+    window.cgv_dispose = function () {
+        try { hideFloatingTooltip(); } catch (e) { /* ignore */ }
+        // Clear any active legend highlight so a fresh Cytoscape instance
+        // does not inherit the previous cluster dimming state.
+        try { clearLegendHighlight(); } catch (e) { /* ignore */ }
+        var tip = document.getElementById('cgv-tooltip');
+        if (tip && tip.parentNode) tip.parentNode.removeChild(tip);
+        var sidePanel = document.getElementById('cgv-side-panel');
+        if (sidePanel && sidePanel.parentNode) sidePanel.parentNode.removeChild(sidePanel);
+    };
+
+    /**
+     * Resize hook invoked by the SWT Resize listener on
+     * {@link GraphViewer}/{@link CytoscapeViewer} so the canvas follows
+     * the composite's actual dimensions. The cytoscape engine needs an
+     * explicit {@code cy.resize()} + {@code cy.fit()} because it does
+     * not auto-detect the parent's Resize event from inside the iframe.
+     */
+    window.cgv_resize = function () {
+        if (!cy) return;
+        // Guard against 0×0 sizes — the parent composite's FillLayout
+        // can briefly report size 0 during the dispose/create sequence
+        // of SwitchingViewer.switchTo(). A cy.resize() + cy.fit() against
+        // a zero viewport collapses every node onto (0,0) and makes
+        // the graph appear blank until the next valid Resize event.
+        // Skip the call in that case — the next cgv_resize with a real
+        // size will sort everything out.
+        var c = document.getElementById('cy');
+        if (c) {
+            var w = c.clientWidth;
+            var h = c.clientHeight;
+            if (w <= 0 || h <= 0) return;
+        }
+        try {
+            cy.resize();
+            // Fit only after the very first paint — running fit() while
+            // preloadSvgImagesAndRedraw is still in flight wipes out the
+            // image badges that haven't finished parsing yet.
+            if (cy.nodes().length > 0) {
+                cy.fit(undefined, 30);
+            }
+        } catch (e) { /* ignore */ }
     };
 
     /* ---- context menu rendering ---- */

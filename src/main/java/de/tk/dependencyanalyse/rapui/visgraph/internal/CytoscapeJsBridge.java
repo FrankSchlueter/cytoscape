@@ -165,6 +165,28 @@ public final class CytoscapeJsBridge {
                 + ", " + (enabled ? "true" : "false") + ");");
     }
 
+    /**
+     * Ask the cytoscape iframe to resize itself to the current container
+     * size and re-fit. Called from the {@link GraphViewerControlBar}'s
+     * Resize-Listener so the canvas follows the composite's actual size
+     * (vis-network and cytoscape do not auto-detect zero-size parents).
+     */
+    public void resize() {
+        exec("if (window.cgv_resize) { window.cgv_resize(); }");
+    }
+
+    /**
+     * Clean up Cytoscape-side artefacts (floating tooltip element, named
+     * listeners) before the Browser is disposed. Without this the
+     * tooltip DOM persists in the iframe's {@code document.body} even
+     * after a switchTo(VIS_NETWORK) — vis-network then shows the
+     * orphan tooltip on top of an empty canvas, which looks like the
+     * graph is gone but only the tooltip survived.
+     */
+    public void disposeIframe() {
+        exec("try { if (window.cgv_dispose) { window.cgv_dispose(); } } catch(e){}");
+    }
+
     /** Remove the legend panel from the iframe. */
     public void clearLegend() {
         exec("window.cgv_applyLegend([], false);");

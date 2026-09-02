@@ -1,4 +1,4 @@
-package de.tk.dependencyanalyse.rapui.visgraph;
+package de.tk.dependencyanalyse.rapui;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;

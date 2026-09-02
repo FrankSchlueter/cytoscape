@@ -83,6 +83,17 @@ public class SwitchingViewer extends Composite {
         if (engine == null || engine == currentEngine) return;
         currentEngine = engine;
         disposeViewer();
+        // Force the composite's FillLayout to recompute BEFORE we add a
+        // new Browser child — without this the fresh Browser widget is
+        // created inside a container whose layout hasn't been updated yet,
+        // so the underlying iframe renders at 0×0. The vis-network and
+        // cytoscape viewers both wait for a non-zero container size
+        // before booting (ResizeObserver / setInterval in their JS
+        // bridges), which means they'd never reach vgv_viewerReady /
+        // cgv_viewerReady — and the queued setGraphData/setLayout calls
+        // would never run. A double layout() around the dispose/create
+        // sequence is enough to make the swap deterministic.
+        layout(true, true);
         if (engine == GraphEngine.CYTOSCAPE) {
             cytoscapeViewer = new CytoscapeViewer(this, SWT.NONE);
             wireViewer(cytoscapeViewer);
@@ -117,6 +128,10 @@ public class SwitchingViewer extends Composite {
                 visViewer.setLegend(currentLegend, true);
             }
         }
+        // Second layout pass — gives the freshly-added Browser widget a
+        // positive size now that the FillLayout knows its sibling count.
+        // The viewer constructors themselves trigger a parent.layout()
+        // as a belt-and-braces measure (see GraphViewer / CytoscapeViewer).
         layout(true, true);
         for (EngineListener l : engineListeners) {
             try { l.engineChanged(currentEngine); } catch (Exception ignored) { }

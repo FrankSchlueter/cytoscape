@@ -1,4 +1,4 @@
-package de.tk.dependencyanalyse.rapui.visgraph;
+package de.tk.dependencyanalyse.rapui;
 
 import jakarta.servlet.ServletContext;
 import jakarta.servlet.ServletRegistration;

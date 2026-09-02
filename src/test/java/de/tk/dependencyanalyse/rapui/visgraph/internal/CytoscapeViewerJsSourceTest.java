@@ -10,6 +10,7 @@ import java.nio.file.Paths;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -854,5 +855,345 @@ class CytoscapeViewerJsSourceTest {
                 "renderEdgesTable must apply cgv-edge-intra className on intra-cluster rows");
         assertTrue(fn.contains("'cgv-edge-bridge'"),
                 "renderEdgesTable must apply cgv-edge-bridge className on bridge rows");
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Stability guards (Fix 1..Fix 7)                                  */
+    /* ------------------------------------------------------------------ */
+
+    @Test
+    void cgvDisposalHandlerCleansUpTooltipAndSidePanel() throws Exception {
+        // Without an explicit disposal hook, the floating tooltip div
+        // (#cgv-tooltip) survives the iframe swap when SwitchingViewer
+        // switches to vis-network — the user sees an empty vis-network
+        // canvas with a stranded Cytoscape tooltip floating on top.
+        // The bridge calls window.cgv_dispose() right before tearing
+        // down the BrowserFunction shim.
+        String src = readViewerJs();
+        assertTrue(src.contains("window.cgv_dispose"),
+                "cytoscape-viewer.js must register window.cgv_dispose so the bridge can clean up the iframe");
+        Pattern body = Pattern.compile(
+                "window\\.cgv_dispose\\s*=\\s*function\\s*\\(\\s*\\)\\s*\\{([\\s\\S]*?)\\n\\s{4}\\}");
+        Matcher m = body.matcher(src);
+        assertTrue(m.find(), "window.cgv_dispose must define a function body");
+        String fn = m.group(1);
+        assertTrue(fn.contains("hideFloatingTooltip"),
+                "cgv_dispose must call hideFloatingTooltip to clear any pending tooltip state");
+        assertTrue(fn.contains("cgv-tooltip"),
+                "cgv_dispose must reference #cgv-tooltip (the floating tooltip element)");
+        assertTrue(fn.contains("cgv-side-panel"),
+                "cgv_dispose must also clean up the legend/edges side panel");
+    }
+
+    @Test
+    void cgvResizeHandlerCallsCyResizeAndFit() throws Exception {
+        // The SWT Resize listener on CytoscapeViewer delegates to
+        // window.cgv_resize(), which must run cy.resize() + cy.fit()
+        // so the canvas follows the composite's actual size.
+        String src = readViewerJs();
+        assertTrue(src.contains("window.cgv_resize"),
+                "cytoscape-viewer.js must register window.cgv_resize");
+        Pattern body = Pattern.compile(
+                "window\\.cgv_resize\\s*=\\s*function\\s*\\(\\s*\\)\\s*\\{([\\s\\S]*?)\\n\\s{4}\\}");
+        Matcher m = body.matcher(src);
+        assertTrue(m.find(), "window.cgv_resize must define a function body");
+        String fn = m.group(1);
+        assertTrue(fn.contains("cy.resize(") || fn.contains("cy.resize()"),
+                "cgv_resize must call cy.resize() so the canvas picks up the new container size");
+        assertTrue(fn.contains("cy.fit("),
+                "cgv_resize must call cy.fit() so the graph reframes after resize");
+    }
+
+    @Test
+    void bootIsIdempotentAndGuarded() throws Exception {
+        // Boot() can be triggered from two competing paths during the
+        // FillLayout flush — the ResizeObserver callback AND the
+        // setTimeout fallback. Without a guard, vis-network/cytoscape
+        // gets initialised twice and the second instance throws.
+        String src = readViewerJs();
+        Pattern bootBody = Pattern.compile(
+                "function boot\\(container\\)\\s*\\{([\\s\\S]*?)\\n\\s{4}\\}");
+        Matcher m = bootBody.matcher(src);
+        assertTrue(m.find(), "boot() must be defined");
+        String fn = m.group(1);
+        assertTrue(fn.contains("cyReady || booting"),
+                "boot() must early-return when cyReady or booting is already true (idempotency guard)");
+        assertTrue(fn.contains("booting = true"),
+                "boot() must set booting=true on entry so concurrent callers bail out");
+        assertTrue(src.contains("var booting = false"),
+                "cytoscape-viewer.js must declare a booting flag at the top of the IIFE");
+    }
+
+    @Test
+    void bootHardTimeoutSurfacesContainerSizeError() throws Exception {
+        // If the parent composite never reaches a non-zero size (FillLayout
+        // race on first engine switch), the boot script must surface a
+        // clear error in the #cgv-debug banner instead of leaving the
+        // user staring at an empty canvas. The hard-timeout is a
+        // setTimeout() in init()'s ResizeObserver branch.
+        String src = readViewerJs();
+        assertTrue(src.contains("Container size 0×0"),
+                "cytoscape-viewer.js must surface a hard-timeout error in #cgv-debug when the container never resizes");
+    }
+
+    @Test
+    void defaultStyleEdgeWidthIsAtLeastTwoForInitialVisibility() throws Exception {
+        // Cytoscape's default edge width was 1.5, which on a dense
+        // LEIDEN_GRID preset is so thin that edges look broken. Bumping
+        // to 2 keeps them visible before the user clicks "Apply Leiden
+        // Clustering" (which would override with the sqrt-scaled
+        // clusterEdgeStyle anyway).
+        String src = readViewerJs();
+        // The default edge rule is the second object literal in the
+        // array returned by defaultStyle(). Pin it by looking for the
+        // edge selector and the immediately following 'width' value.
+        Pattern edgeRule = Pattern.compile(
+                "\\{\\s*selector:\\s*'edge'\\s*,\\s*style:\\s*\\{[^}]*?'width':\\s*(\\d+(?:\\.\\d+)?)");
+        Matcher m = edgeRule.matcher(src);
+        assertTrue(m.find(),
+                "defaultStyle must declare an 'edge' rule with a 'width' value");
+        double width = Double.parseDouble(m.group(1));
+        assertTrue(width >= 2.0,
+                "default edge width must be >= 2 px so the initial edges are visible; got " + width);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Zoom / wheel-sensitivity guards (Fix #N)                        */
+    /* ------------------------------------------------------------------ */
+
+    @Test
+    void cytoscapeIsInitializedWithoutCustomWheelSensitivity() throws Exception {
+        // cytoscape-viewer.js must NOT pass a custom wheelSensitivity to
+        // the cytoscape() constructor. The default (= 1) lets the
+        // browser's native wheel-zoom semantics drive the pan/zoom —
+        // any custom value (e.g. 0.2) makes the canvas zoom 5× more
+        // aggressively than the user expects on mainstream mice +
+        // Windows / Linux, and Cytoscape explicitly logs a warning
+        // about exactly this:
+        //   "You have set a custom wheel sensitivity. This will make
+        //    your app zoom unnaturally when using mainstream mice."
+        // That aggressive zoom is also what causes the user-visible
+        // "graph disappears on too much zoom" symptom — a single
+        // scroll tick at 0.2 sensitivity is enough to push the zoom
+        // past the (then-very-low) minZoom floor of 0.1.
+        //
+        // Note: the source's comment block above mentions
+        // "wheelSensitivity" by name to explain WHY the setting is
+        // absent. The guard below matches only ACTIVE code — a
+        // literal 'wheelSensitivity:' assignment — so the doc
+        // comment does not trip the assertion.
+        String src = readViewerJs();
+        assertFalse(src.matches("(?s).*[\\s\\S]*wheelSensitivity\\s*:[\\s\\S]*"),
+                "cytoscape-viewer.js must NOT set wheelSensitivity on the "
+                        + "cytoscape() constructor — the default (=1) is the only "
+                        + "value that feels natural across all mouse + OS combos. "
+                        + "Setting it to 0.2 caused both a console warning and the "
+                        + "'graph disappears on too much zoom' user-visible bug.");
+    }
+
+    @Test
+    void cytoscapeMinZoomIsHighEnoughToKeepGraphVisible() throws Exception {
+        // minZoom 0.1 was so low that one or two scroll ticks were
+        // enough to zoom past it, which made the canvas appear empty.
+        // The stable floor is 0.25 — anything smaller and the
+        // silhouette dissolves into a single pixel cluster.
+        String src = readViewerJs();
+        Pattern minZoom = Pattern.compile("minZoom:\\s*([\\d.]+)");
+        Matcher m = minZoom.matcher(src);
+        assertTrue(m.find(), "cytoscape() must declare a minZoom value");
+        double floor = Double.parseDouble(m.group(1));
+        assertTrue(floor >= 0.25,
+                "minZoom must be >= 0.25 so the graph silhouette stays "
+                        + "visible at the extreme-out zoom; got " + floor);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Render-stability guards (Fix circle-preset + boot recovery)       */
+    /* ------------------------------------------------------------------ */
+
+    @Test
+    void runPostLoadLayoutClampsZeroContainerSize() throws Exception {
+        // The previous implementation called cy.width() / cy.height()
+        // directly to position nodes on a circle. During the first frame
+        // after an engine switch (or the very first paint of the demo)
+        // the container can briefly read 0×0, and the formula
+        //   cy.width()/2 + Math.cos(angle) * Math.min(cy.width(),
+        //                                          cy.height()) * 0.35
+        // evaluates to 0 for every node — Cytoscape then refuses to draw
+        // them, leaving the canvas blank. The fallback must clamp the
+        // viewport to a sane minimum (600×400) so the formula always
+        // produces well-spread coordinates.
+        String src = readViewerJs();
+        assertTrue(src.contains("Math.max(cy.width() || 0, 600)"),
+                "runPostLoadLayout's circle-preset branch must clamp cy.width() "
+                        + "to >= 600 px so 0-sized containers don't collapse every "
+                        + "node onto the origin");
+        assertTrue(src.contains("Math.max(cy.height() || 0, 400)"),
+                "runPostLoadLayout's circle-preset branch must clamp cy.height() "
+                        + "to >= 400 px for the same reason");
+    }
+
+    @Test
+    void runPostLoadLayoutCallsCyResizeBeforePositioning() throws Exception {
+        // runPostLoadLayout runs while the iframe is being attached to
+        // the composite. Without an explicit cy.resize() right before
+        // computing positions, Cytoscape's cached viewport size lags
+        // behind the real DOM size and the circle preset falls back to
+        // its default 300×300 placeholder.
+        String src = readViewerJs();
+        Pattern fnBody = Pattern.compile(
+                "function runPostLoadLayout\\s*\\(\\s*\\)\\s*\\{([\\s\\S]*?)\\n\\s{4}\\}");
+        Matcher m = fnBody.matcher(src);
+        assertTrue(m.find(), "runPostLoadLayout must be defined");
+        String body = m.group(1);
+        // The cy.resize() call must come BEFORE the position computations.
+        int resizeIdx = body.indexOf("cy.resize()");
+        int circleIdx = body.indexOf("Math.cos(angle)");
+        assertTrue(resizeIdx >= 0 && circleIdx >= 0 && resizeIdx < circleIdx,
+                "runPostLoadLayout must call cy.resize() before positioning nodes "
+                        + "(resizeIdx=" + resizeIdx + " circleIdx=" + circleIdx + ")");
+    }
+
+    @Test
+    void cgvResizeGuardsAgainstZeroContainerSize() throws Exception {
+        // The iframe-side cgv_resize (called from the SWT Resize
+        // listener) must refuse to call cy.resize() / cy.fit() when
+        // the container reports 0×0. Without this guard, the iframe
+        // collapses every node onto (0,0) during the FillLayout
+        // flush — the user reports "switched to Cytoscape, nothing
+        // appears".
+        String src = readViewerJs();
+        Pattern body = Pattern.compile(
+                "window\\.cgv_resize\\s*=\\s*function\\s*\\(\\s*\\)\\s*\\{([\\s\\S]*?)\\n\\s{4}\\}");
+        Matcher m = body.matcher(src);
+        assertTrue(m.find(), "window.cgv_resize must define a function body");
+        String fn = m.group(1);
+        assertTrue(fn.contains("clientWidth") || fn.contains("clientHeight"),
+                "cgv_resize must read the container's clientWidth/clientHeight to detect a 0-sized flush");
+        assertTrue(fn.matches("(?s).*[\\s\\S]*if\\s*\\(w\\s*<=\\s*0\\s*\\|\\|\\s*h\\s*<=\\s*0\\)\\s*return[\\s\\S]*"),
+                "cgv_resize must early-return when the container reports w<=0 or h<=0");
+    }
+
+    @Test
+    void bootClearsBootingFlagOnEveryExitPath() throws Exception {
+        // Earlier versions set booting=true at the top of boot() but
+        // only cleared it implicitly via cyReady=true on the success
+        // path. A failure path (e.g. the cytoscape() constructor
+        // throwing) would leave booting=true forever, so every
+        // subsequent ResizeObserver / setTimeout call would bail at
+        // the "if (cyReady || booting) return;" guard and the viewer
+        // would stay permanently dead.
+        String src = readViewerJs();
+        // doBoot() (the wrapped body) must clear booting on every
+        // early-return path AND on the success path.
+        Pattern doBoot = Pattern.compile(
+                "function doBoot\\(container\\)\\s*\\{([\\s\\S]*?)\\n\\s{4}\\}");
+        Matcher m = doBoot.matcher(src);
+        assertTrue(m.find(), "doBoot must be defined (boot body extracted to allow "
+                + "booting-flag reset on every exit path)");
+        String body = m.group(1);
+        int sets = 0, resets = 0;
+        java.util.regex.Matcher reset = java.util.regex.Pattern.compile(
+                "booting\\s*=\\s*false").matcher(body);
+        while (reset.find()) resets++;
+        java.util.regex.Matcher setFlag = java.util.regex.Pattern.compile(
+                "booting\\s*=\\s*true").matcher(body);
+        while (setFlag.find()) sets++;
+        assertTrue(resets >= 3,
+                "doBoot must reset booting=false on every early-return path "
+                        + "(cytoscape undefined, vis-Network constructor throw, "
+                        + "success path) — found " + resets + " resets, expected >= 3");
+        assertEquals(0, sets,
+                "doBoot must NOT set booting=true (boot() already does that) — found " + sets);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Stability guards (Fix A/B/C/D)                                    */
+    /* ------------------------------------------------------------------ */
+
+    @Test
+    void cytoscapeBootRegistersClassBasedHighlightStylesheet() throws Exception {
+        // After the in-iframe boot finishes, the stylesheet must
+        // include rules for '.cgv-faded' (used by highlightNeighborhood
+        // + applyLegendHighlight) and '.cgv-highlighted' (used by the
+        // legend). Class-based styles avoid the per-element layer-cache
+        // thrash that made the canvas blink on mouse-move.
+        String src = readViewerJs();
+        assertTrue(src.contains(".cgv-faded"),
+                "boot() must register a stylesheet rule for the .cgv-faded class");
+        assertTrue(src.contains(".cgv-highlighted"),
+                "boot() must register a stylesheet rule for the .cgv-highlighted class");
+        assertTrue(src.contains("cgv-node-hover"),
+                "boot() must register a stylesheet rule for the node.cgv-node-hover class (image-hover border)");
+    }
+
+    @Test
+    void highlightNeighborhoodUsesClassNotInlineOpacity() throws Exception {
+        // The mouse-move blink bug came from highlightNeighborhood
+        // setting inline opacity per element via n.style({...}). Class-
+        // based dimming via addClass('cgv-faded') + the stylesheet rule
+        // is one Cytoscape cache pass instead of one per element.
+        String src = readViewerJs();
+        Pattern body = Pattern.compile(
+                "function highlightNeighborhood\\(cy, node\\)\\s*\\{([\\s\\S]*?)\\n\\s{4}\\}");
+        Matcher m = body.matcher(src);
+        assertTrue(m.find(), "highlightNeighborhood must be defined");
+        String fn = m.group(1);
+        assertTrue(fn.contains("addClass('cgv-faded')"),
+                "highlightNeighborhood must use addClass('cgv-faded') for dimming, not inline opacity");
+        assertFalse(fn.contains(".style({"),
+                "highlightNeighborhood must NOT use n.style({...}) for opacity — that's the blink source");
+    }
+
+    @Test
+    void applyLegendHighlightUsesClassForFading() throws Exception {
+        // applyLegendHighlight mixes per-element border styling (the
+        // legend hex has to propagate, so it stays inline) and
+        // class-based fading. Verify both halves are present.
+        String src = readViewerJs();
+        Pattern body = Pattern.compile(
+                "function applyLegendHighlight\\(hex\\)\\s*\\{([\\s\\S]*?)\\n    \\}");
+        Matcher m = body.matcher(src);
+        assertTrue(m.find(), "applyLegendHighlight must be defined");
+        String fn = m.group(1);
+        assertTrue(fn.contains("addClass('cgv-faded')"),
+                "applyLegendHighlight must use addClass('cgv-faded') for non-matching fades");
+        assertTrue(fn.contains("removeClass('cgv-faded')"),
+                "applyLegendHighlight must removeClass('cgv-faded') when restoring matched nodes/edges");
+    }
+
+    @Test
+    void runPostLoadLayoutWaitsForPositiveContainerSize() throws Exception {
+        // The "initial no edges" symptom came from runPostLoadLayout
+        // placing nodes before the container's size had propagated to
+        // Cytoscape's internal viewport. Cytoscape then rendered nothing
+        // because the canvas itself was 0×0. The function must now
+        // observe the container's size and only place nodes once the size
+        // is positive.
+        String src = readViewerJs();
+        Pattern body = Pattern.compile(
+                "function runPostLoadLayout\\(\\)\\s*\\{([\\s\\S]*?)\\n\\s{4}\\}");
+        Matcher m = body.matcher(src);
+        assertTrue(m.find(), "runPostLoadLayout must be defined");
+        String fn = m.group(1);
+        assertTrue(fn.contains("runPostLoadLayoutBody"),
+                "runPostLoadLayout must delegate the actual layout body to runPostLoadLayoutBody so the "
+                        + "size-wait can be inlined at the top of runPostLoadLayout");
+        assertTrue(fn.contains("ResizeObserver"),
+                "runPostLoadLayout must use ResizeObserver to wait for a positive container size");
+    }
+
+    @Test
+    void cgvSetDataIsReentrantSafe() throws Exception {
+        // Re-entrancy guard: when multiple exec() calls fire in quick
+        // succession (ResizeObserver flush, multiple applyData calls),
+        // the second cgv_setData must not clobber the first's
+        // in-flight applyElements. The guard uses a busy flag +
+        // pending-payload pattern.
+        String src = readViewerJs();
+        assertTrue(src.contains("cgvSetDataBusy"),
+                "cgv_setData must guard against re-entrancy with a busy flag");
+        assertTrue(src.contains("cgvSetDataPending"),
+                "cgv_setData must capture the latest payload in a pending slot so a re-entrant call doesn't drop it");
     }
 }

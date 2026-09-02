@@ -76,10 +76,26 @@ public class CsvExampleEntryPoint extends AbstractEntryPoint {
         GraphViewerControlBar bar = new GraphViewerControlBar(parent, viewer,
                 () -> openGraphConfigurationDialog());
 
-        // Load data asynchronously (sync to keep example simple).
-        GraphData data = loadData();
-        if (data == null) {
-            statusLabel.setText("Fehler: Beispielgraph konnte nicht geladen werden.");
+        // Load data straight from the classpath. The earlier HTTP-based
+        // fetchSampleGraph() went through HttpURLConnection inside the
+        // entry-point's UI-thread, which raced with RAP's session
+        // bootstrap and frequently failed on the very first frame
+        // (status: "Fehler: Beispielgraph konnte nicht geladen
+        // werden."). Going straight to loadFromClasspath() removes
+        // the network round-trip, gives us deterministic timing, and
+        // keeps the entry-point render predictable even when the
+        // REST endpoint is unreachable.
+        GraphData data;
+        try {
+            data = loadFromClasspath();
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            statusLabel.setText("Fehler: Beispielgraph konnte nicht aus dem Classpath geladen werden: "
+                    + ex.getMessage());
+            return;
+        }
+        if (data == null || data.getNodes().isEmpty()) {
+            statusLabel.setText("Fehler: Beispielgraph ist leer.");
             return;
         }
         statusLabel.setText("Beispielgraph geladen: "
@@ -228,11 +244,21 @@ public class CsvExampleEntryPoint extends AbstractEntryPoint {
             boolean first = true;
             while ((line = br.readLine()) != null) {
                 if (line.isBlank()) continue;
-                String[] parts = line.split(",");
+                // Strip the UTF-8 BOM (\uFEFF) if it survives on the very
+                // first line. BufferedReader + InputStreamReader("UTF-8")
+                // does not strip the BOM automatically — without this
+                // the header row "Source,Target,Weight" is parsed as an
+                // edge with src="\uFEFFSource", tgt="Target", which adds
+                // two ghost nodes (\uFEFFSource and Target) and one bogus
+                // edge to the graph.
                 if (first) {
                     first = false;
-                    if (parts.length >= 1 && parts[0].trim().equalsIgnoreCase("Source")) continue;
+                    if (!line.isEmpty() && line.charAt(0) == '\uFEFF') {
+                        line = line.substring(1);
+                    }
                 }
+                String[] parts = line.split(",");
+                if (parts.length >= 1 && parts[0].trim().equalsIgnoreCase("Source")) continue;
                 if (parts.length < 2) continue;
                 String src = parts[0].trim();
                 String tgt = parts[1].trim();

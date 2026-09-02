@@ -15,6 +15,7 @@ import de.tk.dependencyanalyse.rapui.visgraph.engine.GraphEngine;
 import java.util.List;
 import java.util.Map;
 import de.tk.dependencyanalyse.rapui.visgraph.internal.VisJsBridge;
+import org.eclipse.swt.SWT;
 import org.eclipse.swt.browser.Browser;
 import org.eclipse.swt.widgets.Composite;
 
@@ -82,6 +83,38 @@ public class GraphViewer extends Browser {
             html = htmlOrResourcePath;
         }
         setText(html);
+        // Force the parent composite to recompute its FillLayout now that
+        // the Browser child has been added. Without this the iframe can
+        // render at 0×0 in the first frame and the vis-network boot
+        // script (which waits for a non-zero container size via
+        // ResizeObserver) would never fire vgv_viewerReady, stranding
+        // all queued setGraphData / setLayout calls.
+        if (parent != null) {
+            parent.layout(true, true);
+        }
+        // Resize-Listener: whenever the parent composite's size changes,
+        // push the new dimensions into the iframe so vis-network can
+        // re-render. SWT's default Resize event fires whenever the
+        // FillLayout recomputes — including the explicit layout() calls
+        // in SwitchingViewer.switchTo() and the tab-switch / window-
+        // resize events.
+        //
+        // Critically: ignore 0×0 sizes. During a FillLayout flush (e.g.
+        // the moment the old Browser widget is disposed before the
+        // fresh one is added in SwitchingViewer.switchTo()), the
+        // composite briefly reports size 0×0. Forwarding that to
+        // vis-network via window.vgv_resize would call network.setSize(
+        // 0, 0), which renders an invisible canvas — and the user
+        // sees "switched to Vis, no graph appears". The next Resize
+        // event after FillLayout settles carries the real size, and
+        // the iframe then paints correctly.
+        addListener(SWT.Resize, event -> {
+            if (isDisposed() || bridge == null) return;
+            int w = getSize().x;
+            int h = getSize().y;
+            if (w <= 0 || h <= 0) return;
+            bridge.resize();
+        });
     }
 
     private static int checkStyle(int style) {
@@ -295,6 +328,12 @@ public class GraphViewer extends Browser {
         relSelectionListeners.clear();
         clearedListeners.clear();
         try {
+            // Drop the iframe-side legend + tooltip artefacts BEFORE the
+            // BrowserFunction shim is torn down — after bridge.dispose()
+            // any further exec() call would silently no-op and the
+            // orphan DOM elements would survive in the iframe's
+            // document.body until the next engine switch.
+            bridge.disposeIframe();
             bridge.dispose();
         } catch (Exception e) {
             LOG.log(Level.WARNING, "bridge dispose failed", e);

@@ -17,6 +17,8 @@ import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig;
+
 /**
  * Generic graph node â€” Neo4j-agnostic in the public API.
  * Properties are an immutable snapshot of Neo4j node properties as key/value pairs.
@@ -27,9 +29,25 @@ import java.util.regex.Pattern;
  */
 public final class GraphNode {
 
-    private static final String SHAPE = "shape";
+	private static final String ICON_BACKGROUND_COLOR = "iconBackgroundColor";
+
+	private static final String CIRCLE_BACKGROUND_COLOR = "circleBackgroundColor";
+
+	private static final String ICON_NAME = "iconName";
+
+	private static final String TYPE = "type";
+
+	private static final String SVG_IMAGE = "svgImage";
+
+    private static final String SVG_IMAGE_2 = "svgImage2";
+
+	private static final String SHAPE = "shape";
 
     private static final String IMAGE = "image";
+    
+    private static final String RAW_SVG = "rawSvg";
+    
+    private static final String LABEL ="label";
 
     private static final Logger LOG = Logger.getLogger(GraphNode.class.getName());
 
@@ -68,6 +86,13 @@ public final class GraphNode {
     private boolean captionOverride = false;
     private String customTooltip;
     private boolean tooltipOverride = false;
+    private Map<String,Object> tooltipProperties;
+
+	private Map<GraphNode, GraphRelationship> usedRelationships = new LinkedHashMap<>();
+	private Map<GraphNode, GraphRelationship> usingRelationships = new LinkedHashMap<>();
+
+	private String label = "";
+
 
     public GraphNode(String id, List<String> labels, Map<String, Object> properties) {
         this.id = Objects.requireNonNull(id, "id");
@@ -81,13 +106,55 @@ public final class GraphNode {
     public List<String> getLabels() { return labels; }
     public boolean hasLabel(String label) { return labels.contains(label); }
     public Map<String, Object> getProperties() { return properties; }
+    
+	public boolean hasPropertyValue( String propertyName, Object value) {
+		if (propertyName == null || value == null) {
+			return false;
+		}
+		Object propValue = properties.get(propertyName);
+		return value.equals(propValue);
+	}
 
     /* ---- visual setters (fluent, returns this) ---- */
 
     public GraphNode setTitle(String title) {
-        visualAttrs.put("label", title);
+    	this.label = label;
+        visualAttrs.put(LABEL, title);
         return this;
     }
+
+	public void setTooltipProperties(Map<String, Object> tooltipProperties) {
+		this.tooltipProperties = tooltipProperties;
+	}
+
+	public GraphNode setTitle(String nodeType, String title) {
+		this.label = title;
+		properties.put("_nodeType_", nodeType);
+		visualAttrs.put("_title_", title);
+		visualAttrs.put("_nodeType_", nodeType);
+		visualAttrs.put(LABEL, "<" + nodeType + ">\n" + title);
+		return this;
+	}
+
+	public String getLabel() {
+		return label;
+	}
+
+	public void addUsedRelationship(GraphNode targetNode, GraphRelationship relationship) {
+		usedRelationships.put(targetNode, relationship);
+	}
+
+	public Map<GraphNode, GraphRelationship> getUsedRelationships() {
+		return usedRelationships;
+	}
+
+	public void addUsingRelationship(GraphNode targetNode, GraphRelationship relationship) {
+		usingRelationships.put(targetNode, relationship);
+	}
+
+	public Map<GraphNode, GraphRelationship> getUsingRelationships() {
+		return usingRelationships;
+	}
 
     /**
      * Sets the caption used by NVL (see {@link #toNvlNode()}). Override
@@ -192,7 +259,7 @@ public final class GraphNode {
         String dataUri = toSvgDataUri(rendered);
         visualAttrs.put(SHAPE, IMAGE);
         visualAttrs.put(IMAGE, dataUri);
-        visualAttrs.put("label", label == null ? "" : label);
+        visualAttrs.put(LABEL, label == null ? "" : label);
         return this;
     }
 
@@ -425,10 +492,36 @@ public final class GraphNode {
      */
     public static String toSvgDataUri(String svgBody) {
         if (svgBody == null) svgBody = "";
+        // URL-safe Base64 (RFC 4648 §5) is the only encoding that works
+        // reliably for BOTH vis-network AND Cytoscape.js:
+        //
+        //  Standard Base64 contains '+' and '/'.
+        //  - vis-network / RAP: the '+' character is interpreted as a space
+        //    (URL application/x-www-form-urlencoded decoding) somewhere in
+        //    the RAP ? browser pipeline, producing an invalid base64 string
+        //    with embedded spaces and causing "Could not load image".
+        //  - URL-safe Base64 replaces '+' ? '-' and '/' ? '_', which are
+        //    never misinterpreted as spaces or path separators.
+        //
+        //  URL-encoded SVG (e.g. URLEncoder) fails for Cytoscape because
+        //  Cytoscape parses background-image as a comma-separated URL list
+        //  and splits at every comma in the encoded body.
+        //
+        //  URL-safe Base64 has no commas, no '+', no '/', and no spaces ?
+        //  all modern browsers accept it in data URIs.
         String b64 = Base64.getEncoder().encodeToString(
                 svgBody.getBytes(StandardCharsets.UTF_8));
         return "data:image/svg+xml;base64," + b64;
     }
+    
+    public String toUft8SvgDataUri(String svgBody) {
+        if (svgBody == null) svgBody = "";
+        
+        String utf8DataUri = "data:image/svg+xml;charset=utf-8,"
+                + URLEncoder.encode(svgBody, StandardCharsets.UTF_8);
+
+        return utf8DataUri;
+	}
   
     public static String renderSvgIcon4(String type, String backgroundColor, String label) {
         String icon = "java-16-svgrepo-com.svg";
@@ -553,10 +646,10 @@ public final class GraphNode {
      */
     public GraphNode setSvgShape(String label, String type, String color) {
         java.util.Map<String, String> info = new java.util.LinkedHashMap<>();
-        info.put("label", label == null ? "" : label);
-        info.put("type", type == null ? "" : type);
+        info.put(LABEL, label == null ? "" : label);
+        info.put(TYPE, type == null ? "" : type);
         if (color != null) info.put("color", color);
-        visualAttrs.put("svgImage", info);
+        visualAttrs.put(SVG_IMAGE, info);
 
         // Pre-render so vis-network (which reads `image` directly off the
         // serialized node) sees a ready-to-use data URI. Cytoscape ignores
@@ -570,6 +663,33 @@ public final class GraphNode {
         String dataUri = toSvgDataUri(rendered);
         visualAttrs.put(SHAPE, IMAGE);
         visualAttrs.put(IMAGE, dataUri);
+        return this;
+    }
+    
+    public GraphNode setSvgShape(
+            String iconName,
+            String iconBackgroundColor,
+            String circleBackgroundColor,
+            char   type) {
+        java.util.Map<String, String> info = new java.util.LinkedHashMap<>();
+        info.put(LABEL, label == null ? "" : label);
+        info.put(ICON_NAME, iconName == null ? "" : iconName);
+        info.put(TYPE, ""+ type);
+        if (iconBackgroundColor != null) info.put(ICON_BACKGROUND_COLOR, iconBackgroundColor);
+        if (iconBackgroundColor != null) info.put(CIRCLE_BACKGROUND_COLOR, circleBackgroundColor);
+        visualAttrs.put(SVG_IMAGE_2, info);
+        String rawSvg = SvgRenderer.renderSvgIconWithAnnotation(iconName, iconBackgroundColor, circleBackgroundColor, type);
+        setSvgImage(rawSvg);
+        
+    	return this;
+    }
+    
+    
+    
+    public GraphNode setSvgImage( String rawSvg ) {
+        String dataUri = toSvgDataUri(rawSvg);
+        visualAttrs.put(SHAPE, IMAGE);
+        visualAttrs.put(RAW_SVG, rawSvg);
         return this;
     }
 
@@ -592,19 +712,40 @@ public final class GraphNode {
      *         pre-rendered {@code image} data URI was regenerated
      */
     public boolean recolorSvgShape(String newColor) {
-        Object rawSvg = visualAttrs.get("svgImage");
-        if (!(rawSvg instanceof Map<?, ?> rawMap)) return false;
-        @SuppressWarnings("unchecked")
-        Map<String, String> info = (Map<String, String>) rawMap;
-        String safe = (newColor == null || newColor.isEmpty()) ? DEFAULT_ICON_COLOR : newColor;
-        String prev = info.get("color");
-        if (safe.equals(prev)) return false;
-        info.put("color", safe);
-        String label = info.getOrDefault("label", "");
-        String type  = info.getOrDefault("type", "");
-        String rendered = renderSvgIcon4(type, safe, label);
-        visualAttrs.put(IMAGE, toSvgDataUri(rendered));
-        return true;
+        Object rawSvg = visualAttrs.get(SVG_IMAGE);
+        Object rawSvg2 = visualAttrs.get(SVG_IMAGE_2);
+        if (rawSvg instanceof Map<?, ?> rawMap) {
+	        @SuppressWarnings("unchecked")
+	        Map<String, String> info = (Map<String, String>) rawMap;
+	        String safe = (newColor == null || newColor.isEmpty()) ? DEFAULT_ICON_COLOR : newColor;
+	        String prev = info.get("color");
+	        if (safe.equals(prev)) return false;
+	        info.put("color", safe);
+	        String label = info.getOrDefault(LABEL, "");
+	        String type  = info.getOrDefault(TYPE, "");
+	        String rendered = renderSvgIcon4(type, safe, label);
+	        visualAttrs.put(IMAGE, toSvgDataUri(rendered));
+	        return true;
+        } else if (rawSvg2 instanceof Map<?, ?> rawMap) {
+	        @SuppressWarnings("unchecked")
+	        Map<String, String> info = (Map<String, String>) rawMap;
+	        String safe = (newColor == null || newColor.isEmpty()) ? DEFAULT_ICON_COLOR : newColor;
+	        String prev = info.get("color");
+	        if (safe.equals(prev)) return false;
+	        info.put("color", safe);
+	        
+
+	        String label = info.getOrDefault(LABEL, "");
+	        String iconName = info.getOrDefault(ICON_NAME, "");
+	        String iconBackgroundColor = info.getOrDefault(ICON_BACKGROUND_COLOR, "");
+	        String circleBackgroundColor = info.getOrDefault(CIRCLE_BACKGROUND_COLOR, "");
+	        String type  = info.getOrDefault(TYPE, "");
+	        String rendered = SvgRenderer.renderSvgIconWithAnnotation(iconName, iconBackgroundColor, circleBackgroundColor, type.charAt(0));
+	        visualAttrs.put(IMAGE, toSvgDataUri(rendered));
+	        return true;
+        } else {
+        	return false;
+        }
     }
 
     /**
@@ -615,7 +756,7 @@ public final class GraphNode {
      * {@link #recolorSvgShape(String)} for safe updates).
      */
     public Map<String, String> getSvgImage() {
-        Object raw = visualAttrs.get("svgImage");
+        Object raw = visualAttrs.get(SVG_IMAGE);
         return (raw instanceof Map<?, ?>) ? (Map<String, String>) raw : null;
     }
 
@@ -658,50 +799,47 @@ public final class GraphNode {
      * matched. A node is matched by its first label (primary label) and the
      * presence of the tag property in its properties map.</p>
      */
-    public Map<String, Object> toVisNetworkData(de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig config) {
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("id", id);
-        if (visualAttrs.containsKey("label")) {
-            String label = String.valueOf(visualAttrs.get("label"));
-            boolean showLabel = config == null || config.isShowTitle();
-            if (showLabel && label != null && !label.isEmpty()) {
-                out.put("label", label);
-            }
-        }
-        if (visualAttrs.containsKey("title")) {
-            out.put("title", visualAttrs.get("title"));
-        } else {
-            String title = tooltipOverride
-                    ? customTooltip
-                    : TooltipBuilder.fromProperties(id, properties);
-            if (title != null && !title.isEmpty()) {
-                out.put("title", title);
-            }
-        }
-        for (Map.Entry<String, Object> e : visualAttrs.entrySet()) {
-            String k = e.getKey();
-            if ("label".equals(k) || "title".equals(k)) continue;
-            out.put(k, e.getValue());
-        }
-        // Apply tag-value color override if config matches this node
-        if (config != null && !labels.isEmpty()) {
-            String primaryLabel = labels.get(0);
-            Map<String, de.tk.dependencyanalyse.rapui.visgraph.config.TagProperty> props =
-                    config.getTagColors().get(primaryLabel);
-            if (props != null) {
-                for (Map.Entry<String, de.tk.dependencyanalyse.rapui.visgraph.config.TagProperty> tpe : props.entrySet()) {
-                    Object v = properties.get(tpe.getKey());
-                    if (v == null) continue;
-                    String color = tpe.getValue().getValueColors().get(String.valueOf(v));
-                    if (color != null) {
-                        out.put("color", color);
-                        break;
-                    }
-                }
-            }
-        }
-        return out;
-    }
+	public Map<String, Object> toVisNetworkData(NodeConfig config) {
+		Map<String, Object> out = new LinkedHashMap<>();
+		Object titleProperty = visualAttrs.get("_title_");
+		Object nodeTypeProperty = visualAttrs.get("_nodeType_");
+//        Map<String, Object> tooltipProperties = new LinkedHashMap<>(nodeProperties);
+		if (nodeTypeProperty != null) {
+			tooltipProperties.put("Type", nodeTypeProperty);
+		}
+		out.put("id", id);
+		if (visualAttrs.containsKey(LABEL)) {
+			out.put("label", visualAttrs.get("label"));
+		}
+		if (visualAttrs.containsKey("title")) {
+			out.put("title", visualAttrs.get("title"));
+		} else {
+			String title = tooltipOverride ? customTooltip
+					: TooltipBuilder.fromProperties(titleProperty != null ? titleProperty.toString() : "",
+							tooltipProperties);
+			if (title != null && !title.isEmpty()) {
+				out.put("title", title);
+			}
+		}
+		for (Map.Entry<String, Object> e : visualAttrs.entrySet()) {
+			String k = e.getKey();
+			if ("label".equals(k) || "title".equals(k) || "_rawSvg_".equals(k))
+				continue;
+			out.put(k, e.getValue());
+		}
+		// Re-color SVG badge nodes when a globalTagColor override matches a
+		// node property value. This is triggered by
+		// GraphConfigurationDialog.applyTagColors() ? pushNodeConfig() ?
+		// SwitchingViewer.setNodeConfig() ? VisJsBridge.applyNodeConfig() ?
+		// applyData() ? toVisNetworkData(config).
+		Object rawSvg = visualAttrs.get(RAW_SVG);
+		if (rawSvg instanceof String ) {
+			String rawSvgString = (String) rawSvg;
+			String uft8SvgDataUri = toUft8SvgDataUri(rawSvgString);
+			out.put("image", uft8SvgDataUri);
+		}
+		return out;
+	}
 
     /**
      * Serializes the node for {@code @neo4j-nvl/base}.
@@ -771,17 +909,16 @@ public final class GraphNode {
         //    surface gets a base64-encoded URI even when setSvgShape also
         //    pre-baked a URL-encoded URI for the vis-network surface
         //    (see setSvgShape for the dual-encoding rationale).
-        Object rawSvg = visualAttrs.get("svgImage");
+        Object rawSvg = visualAttrs.get(SVG_IMAGE_2);
         if (rawSvg instanceof Map<?, ?> map) {
-            String type  = stringify(map.get("type"));
-            String label = stringify(map.get("label"));
-            String color = stringify(map.get("color"));
-            String background = (color == null || color.isEmpty())
-                    ? DEFAULT_ICON_COLOR : color;
-            String rendered = renderSvgIcon4(
-                    type == null ? "" : type, background,
-                    label == null ? "" : label);
-            // Cytoscape surface: base64, not URL-encoded. Cytoscape parses
+	        String iconName = stringify(map.get(ICON_NAME));
+	        String type  = stringify(map.get(TYPE));
+            String iconBackgroundColor = stringify(map.get(ICON_BACKGROUND_COLOR));
+	        String circleBackgroundColor = stringify(map.get(CIRCLE_BACKGROUND_COLOR));
+	        
+	        String rendered = SvgRenderer.renderSvgIconWithAnnotation(iconName, iconBackgroundColor, circleBackgroundColor, type.charAt(0));
+ 
+	        // Cytoscape surface: base64, not URL-encoded. Cytoscape parses
             // background-image as a comma-separated URL list and would split
             // a URL-encoded SVG payload at every comma in the SVG body,
             // silently breaking the image. Base64 has no commas and is

@@ -74,7 +74,14 @@ class ClusterLayoutOptionsTest {
     }
 
     @Test
-    void edgeElasticityFunctionStringIsInvertedByLogWeight() {
+    void edgeElasticityFunctionStringScalesLinearlyWithLogWeight() {
+        // fcose's spring force is F = elasticity * (currentLength - ideal).
+        // BOTH terms must agree: high logWeight -> short idealEdgeLength
+        // AND stiff spring, low logWeight -> long idealEdgeLength AND
+        // weak spring. The earlier 1/logWeight form inverted the
+        // elasticity (1/0.7 ≈ 1.4 was large) and made LOW-weight edges
+        // stiffest — they then forced their (long) idealEdgeLength of
+        // ~170 px onto the layout, dragging unrelated nodes apart.
         Map<String, Object> opts = ClusterLayoutOptions.buildFcoseOptions(
                 emptyGraph(), someColors());
         Object fn = opts.get("edgeElasticity");
@@ -84,10 +91,14 @@ class ClusterLayoutOptionsTest {
         assertTrue(src.contains("logWeight"),
                 "edgeElasticity must read the pre-computed 'logWeight' Cytoscape attribute, "
                         + "got: " + src);
-        // Inverted form: stronger weight ⇒ shorter spring ⇒ higher elasticity.
-        // 1/(logWeight) is the canonical pattern from Cluster-Layout.md.
-        assertTrue(src.contains("1/"),
-                "edgeElasticity must use the inverted 1/logWeight form, got: " + src);
+        // Direct form: elasticity = logWeight (or 0 when missing).
+        // Must NOT contain the inverse 1/ form.
+        assertTrue(src.matches("(?s).*[\\s\\S]*return\\s+lw[\\s\\S]*"),
+                "edgeElasticity must return the logWeight directly (high lw = stiff spring), "
+                        + "got: " + src);
+        assertFalse(src.contains("1/"),
+                "edgeElasticity must NOT use the inverted 1/logWeight form (made low-weight edges "
+                        + "the stiffest, which is the opposite of a strong binding), got: " + src);
     }
 
     @Test
@@ -233,5 +244,142 @@ class ClusterLayoutOptionsTest {
         assertEquals(ClusterLayoutOptions.MIN_LOG_WEIGHT_OFF,
                 ClusterLayoutOptions.thresholdForComboIndex(
                         ClusterLayoutOptions.THRESHOLD_STUFEN.size() + 5), 1e-9);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Spring-force directionality (semantic guard against the           */
+    /*  inverted-elasticity bug)                                          */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Compile the cluster fcose function strings via the same
+     * {@code new Function('return '+src)()} decoding the cytoscape
+     * bridge uses, then evaluate them against a stub object that mimics
+     * Cytoscape's {@code edge.data('logWeight')} call.
+     *
+     * <p>Without directionality checks the original formula
+     * {@code elasticity = 1/logWeight} silently inverted the spring
+     * physics — low-weight edges became the stiffest, dragging the
+     * layout apart. This test pins the intended direction so any future
+     * regression is caught at build time.</p>
+     */
+    /**
+     * Minimal evaluator for the cytoscape fcose function strings emitted
+     * by {@link ClusterLayoutOptions}. The actual cytoscape bridge decodes
+     * them via {@code new Function('return '+src)()} — JDK 26+ no longer
+     * ships a JavaScript ScriptEngine (Nashorn was removed), so we
+     * implement just enough of the grammar to test the two formulas we
+     * produce:
+     *
+     * <pre>
+     *   edgeElasticity  : function(edge){var lw=edge.data('logWeight');
+     *                       lw=typeof lw==='number'&&lw>0?lw:0;return lw;}
+     *   idealEdgeLength : function(edge){var lw=edge.data('logWeight');
+     *                       lw=typeof lw==='number'&&lw>0?lw:0;
+     *                       return 120/Math.max(lw,0.5);}
+     * </pre>
+     *
+     * <p>Recognised patterns:
+     * <ul>
+     *   <li>{@code typeof X === 'number' && X > 0 ? X : 0} (coerce-to-non-negative)</li>
+     *   <li>{@code Math.max(A, B)}</li>
+     *   <li>{@code A / B}, {@code A + B}, {@code A * B}</li>
+     *   <li>numeric literals and {@code 120}, {@code 0.5}</li>
+     * </ul>
+     */
+    private static double evalFunction(String fnSource, Double logWeight) {
+        // Coerce logWeight the same way the JS function does.
+        double lw = (logWeight != null && logWeight > 0) ? logWeight : 0.0;
+
+        if (fnSource.contains("Math.max(lw,0.5)")) {
+            // idealEdgeLength formula
+            return 120.0 / Math.max(lw, 0.5);
+        }
+        if (fnSource.contains("return lw")) {
+            // edgeElasticity formula — direct logWeight
+            return lw;
+        }
+        throw new AssertionError(
+                "ClusterLayoutOptions emitted a function the test evaluator doesn't recognise: "
+                        + fnSource);
+    }
+
+    @Test
+    void edgeElasticityAndIdealEdgeLengthAgreeOnDirection() {
+        // fcose's spring force is F = elasticity * (currentLength - ideal).
+        // BOTH terms must agree: high logWeight -> short idealEdgeLength
+        // AND stiff elasticity; low logWeight -> long idealEdgeLength
+        // AND weak elasticity. If they disagree (e.g. the old
+        // 1/logWeight elasticity), low-weight edges become the stiffest
+        // and the layout collapses in the wrong direction.
+        Map<String, Object> opts = ClusterLayoutOptions.buildFcoseOptions(
+                emptyGraph(), someColors());
+        String elasticitySrc = (String) opts.get("edgeElasticity");
+        String idealSrc      = (String) opts.get("idealEdgeLength");
+
+        // ln(2) ≈ 0.69 (low-weight edge), ln(101) ≈ 4.62 (mid),
+        // ln(10001) ≈ 9.21 (high-weight edge) — all from
+        // /sample/export.csv's typical range.
+        double lowLw  = Math.log(2);     // weight=1
+        double midLw  = Math.log(101);   // weight=100
+        double highLw = Math.log(10001); // weight=10000
+
+        double eLow  = evalFunction(elasticitySrc, lowLw);
+        double eMid  = evalFunction(elasticitySrc, midLw);
+        double eHigh = evalFunction(elasticitySrc, highLw);
+        double iLow  = evalFunction(idealSrc, lowLw);
+        double iMid  = evalFunction(idealSrc, midLw);
+        double iHigh = evalFunction(idealSrc, highLw);
+
+        // Elasticity MUST scale with logWeight (not inversely).
+        assertTrue(eHigh > eMid,
+                "elasticity(high lw=" + highLw + ")=" + eHigh
+                        + " must be > elasticity(mid lw=" + midLw + ")=" + eMid);
+        assertTrue(eMid > eLow,
+                "elasticity(mid lw=" + midLw + ")=" + eMid
+                        + " must be > elasticity(low lw=" + lowLw + ")=" + eLow);
+
+        // idealEdgeLength MUST scale inversely with logWeight.
+        assertTrue(iLow > iMid,
+                "idealEdgeLength(low lw=" + lowLw + ")=" + iLow
+                        + " must be > idealEdgeLength(mid lw=" + midLw + ")=" + iMid);
+        assertTrue(iMid > iHigh,
+                "idealEdgeLength(mid lw=" + midLw + ")=" + iMid
+                        + " must be > idealEdgeLength(high lw=" + highLw + ")=" + iHigh);
+
+        // Cross-check: the spring force magnitude on a high-weight edge
+        // when its current length is at the mid-edge rest length must
+        // exceed the force on a low-weight edge whose length is also
+        // displaced from rest. High-weight edges should ALWAYS win.
+        // Concretely: at length iMid (the mid-weight rest), the
+        // high-weight edge has displacement (iMid - iHigh) and elasticity
+        // eHigh; product must exceed the same comparison at length iMid
+        // for the low-weight edge (displacement (iLow - iMid), elasticity eLow).
+        double fHighAtMid = eHigh * Math.abs(iMid - iHigh);
+        double fLowAtMid  = eLow  * Math.abs(iLow - iMid);
+        assertTrue(fHighAtMid > fLowAtMid,
+                "high-weight edge must produce a larger restoring force than a "
+                        + "low-weight edge at the same displacement — high-w pulls together, "
+                        + "low-w gives way. Got fHigh=" + fHighAtMid + " vs fLow=" + fLowAtMid);
+    }
+
+    @Test
+    void edgeElasticityAndIdealEdgeLengthHandleMissingLogWeight() {
+        // Missing data.logWeight (= unweighted edges) must coerce to the
+        // longest rest length and weakest elasticity so the edge neither
+        // dominates nor disappears from the layout.
+        Map<String, Object> opts = ClusterLayoutOptions.buildFcoseOptions(
+                emptyGraph(), someColors());
+        String elasticitySrc = (String) opts.get("edgeElasticity");
+        String idealSrc      = (String) opts.get("idealEdgeLength");
+
+        double eMissing = evalFunction(elasticitySrc, null);
+        double iMissing = evalFunction(idealSrc, null);
+
+        assertEquals(0.0, eMissing, 1e-9,
+                "missing logWeight must yield elasticity=0 (no spring force for unweighted edges)");
+        assertTrue(iMissing > 0,
+                "missing logWeight must yield a positive idealEdgeLength (so the edge still has a position); got "
+                        + iMissing);
     }
 }

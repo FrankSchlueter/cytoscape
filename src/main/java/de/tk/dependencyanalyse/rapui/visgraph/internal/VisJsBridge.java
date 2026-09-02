@@ -149,6 +149,16 @@ public final class VisJsBridge {
         exec("window.vgv_fitToScreen();");
     }
 
+    /**
+     * Ask the vis-network iframe to resize itself to the current
+     * container size and re-draw. Called from {@link GraphViewer}'s
+     * Resize-Listener so the canvas follows the composite's actual
+     * size (vis-network does not auto-detect zero-size parents).
+     */
+    public void resize() {
+        exec("if (window.vgv_resize) { window.vgv_resize(); }");
+    }
+
     public void setLayout(String algorithm) {
         exec("window.vgv_setLayout('" + algorithm + "');");
     }
@@ -216,6 +226,17 @@ public final class VisJsBridge {
     public void dispose() {
         functions.dispose();
         scriptQueue.dispose();
+    }
+
+    /**
+     * Clean up vis-network-side artefacts (legend highlight, tooltip
+     * containers) before the Browser is disposed. Symmetric counterpart
+     * to {@link CytoscapeJsBridge#disposeIframe()} — without this hook
+     * the orphan {@code #vgv-legend} / {@code #vgv-context-menu} divs
+     * would float on top of an empty iframe after an engine switch.
+     */
+    public void disposeIframe() {
+        exec("try { if (window.vgv_dispose) { window.vgv_dispose(); } } catch(e){}");
     }
 
     /* ---- private ---- */

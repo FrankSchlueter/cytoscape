@@ -16,8 +16,14 @@ import java.util.Map;
  *   <li><b>Edge-Logarithmierung</b> — {@code idealEdgeLength} and
  *       {@code edgeElasticity} read the pre-computed {@code logWeight} Cytoscape
  *       attribute (surfaced by {@code GraphRelationship.toCytoscapeEdge()} as
- *       {@code ln(weight+1)}) so extreme weights (1..10000) get compressed
- *       to a sane spring range.</li>
+ *       {@code ln(weight+1)}). fcose's spring force is
+ *       {@code elasticity × (currentLength − idealEdgeLength)}, so both
+ *       terms must agree on direction: high {@code logWeight} ⇒ short
+ *       idealEdgeLength AND stiff spring (Hooksches k). Low
+ *       {@code logWeight} ⇒ long idealEdgeLength AND weak spring.
+ *       Earlier versions used {@code 1/logWeight} for elasticity, which
+ *       made LOW-weight edges the stiffest and pulled unrelated nodes
+ *       apart — the opposite of a strong binding.</li>
  *   <li><b>Compound-Parents</b> — the Cytoscape bridge injects one
  *       {@code node[isCluster]} parent per Leiden community and sets
  *       {@code data.parent} on every member node. fcose's
@@ -158,18 +164,32 @@ public final class ClusterLayoutOptions {
         // browser-native language fcose already understands. Bridge decodes
         // the strings via new Function('return '+src)().
         //
-        //   edgeElasticity  : high logWeight → tighter spring
-        //                     formula: 1 / max(logWeight, 1)
-        //   idealEdgeLength : low  logWeight → longer "stretch"
-        //                     formula: 120 * 1 / max(logWeight, 1)
+        //   edgeElasticity  : high logWeight → stiffer spring (Hooke 'k')
+        //                     formula: max(logWeight, 0)   (clamped at 0)
+        //   idealEdgeLength : high logWeight → shorter rest length
+        //                     formula: 120 / max(logWeight, 0.5)
+        //
+        // fcose computes the spring force as
+        //   F = elasticity * (currentLength - idealEdgeLength)
+        // so BOTH terms must agree on the direction:
+        //   - high logWeight → short idealEdgeLength AND stiff spring:
+        //     both pull the endpoints together with strong force.
+        //   - low logWeight → long idealEdgeLength AND weak spring:
+        //     the endpoints drift apart and the spring doesn't fight it.
+        //
+        // Earlier versions used 1/logWeight for both, which made LOW-weight
+        // edges stiff (because 1/0.7 ≈ 1.4 is large) — they then forced their
+        // (long) idealEdgeLength of ~170 px onto the layout, dragging
+        // unrelated nodes apart. That's the opposite of what a strong
+        // binding should look like.
         //
         // Cytoscape's data('logWeight') returns undefined when an edge has
-        // no weight attribute; we coerce that to 1 so weak-weight edges
-        // don't blow up the spring math.
+        // no weight attribute; we coerce lw to 0 so unweighted edges get
+        // the longest rest length and zero elasticity (no spring force).
         opts.put("edgeElasticity",
-                "function(edge){var lw=edge.data('logWeight');return 1/(typeof lw==='number'&&lw>0?lw:1);}");
+                "function(edge){var lw=edge.data('logWeight');lw=typeof lw==='number'&&lw>0?lw:0;return lw;}");
         opts.put("idealEdgeLength",
-                "function(edge){var lw=edge.data('logWeight');return 120/(typeof lw==='number'&&lw>0?lw:1);}");
+                "function(edge){var lw=edge.data('logWeight');lw=typeof lw==='number'&&lw>0?lw:0;return 500/Math.max(lw,0.5);}");
 
         // Pre-Layout Edge-Filter threshold (Cluster-Layout.md §5). The
         // Cytoscape bridge reads this via isClusterLayoutActive() / the

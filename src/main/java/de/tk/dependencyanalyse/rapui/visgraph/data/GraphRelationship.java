@@ -32,13 +32,13 @@ public final class GraphRelationship {
     private final String type;
     private final GraphNode sourceNode;
     private final GraphNode targetNode;
-    private final Map<String, Object> properties;
+    private Map<String, Object> properties;
     private final Map<String, Object> visualAttrs = new LinkedHashMap<>();
     private String customTooltip;
     private boolean tooltipOverride = false;
 
     /**
-     * Primary constructor — source and target are full node references.
+     * Primary constructor â source and target are full node references.
      * String ids are derived from the nodes so callers downstream do not
      * need to keep their own mapping in sync.
      */
@@ -62,7 +62,7 @@ public final class GraphRelationship {
      * {@link #getSource()} / {@link #getTarget()}.
      *
      * @deprecated Use {@link #GraphRelationship(String, String, GraphNode, GraphNode, Map)}
-     *             — constructing with bare strings loses the connection
+     *             â constructing with bare strings loses the connection
      *             back to the originating nodes.
      */
     @Deprecated
@@ -97,6 +97,11 @@ public final class GraphRelationship {
 
     public Map<String, Object> getProperties() { return Collections.unmodifiableMap(properties); }
 
+    public void setProperties(Map<String, Object> newProperties) {
+		if (newProperties != null) {
+			properties = newProperties;
+		}
+	}
     /**
      * Optional edge weight (typically a non-negative double; values &lt;= 0
      * are normalized to {@code 1.0} by {@link #getWeight()} so layouts can
@@ -126,7 +131,7 @@ public final class GraphRelationship {
     /**
      * Convenience accessor that returns {@code log10(weight)} clamped to a
      * non-negative value. Useful for layout algorithms that scale edge
-     * length by the logarithm of the weight — see the
+     * length by the logarithm of the weight â see the
      * {@code SampleGraphController} fcose options for a usage example.
      */
     public double getLog10Weight() {
@@ -291,7 +296,7 @@ public final class GraphRelationship {
      * fields so the JS bridge can use them directly for fcose's
      * {@code idealEdgeLength} without having to dereference properties.</p>
      *
-     * <p>Visual attributes are intentionally NOT included — Cytoscape styling
+     * <p>Visual attributes are intentionally NOT included â Cytoscape styling
      * is configured separately by the bridge via style selectors.</p>
      */
     public Map<String, Object> toCytoscapeEdge() {
