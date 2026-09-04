@@ -492,7 +492,7 @@ public final class GraphNode {
      */
     public static String toSvgDataUri(String svgBody) {
         if (svgBody == null) svgBody = "";
-        // URL-safe Base64 (RFC 4648 §5) is the only encoding that works
+        // URL-safe Base64 (RFC 4648 sec. 5) is the only encoding that works
         // reliably for BOTH vis-network AND Cytoscape.js:
         //
         //  Standard Base64 contains '+' and '/'.

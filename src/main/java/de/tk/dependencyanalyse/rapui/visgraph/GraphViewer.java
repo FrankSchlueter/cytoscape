@@ -56,6 +56,14 @@ public class GraphViewer extends Browser {
     private volatile int hierarchicalNodeSpacing = 100;
     private volatile int stabilizationIterations = 1000;
     private volatile boolean autoFitOnStabilization = true;
+    /**
+     * Most recent vis-network layout-option map pushed via
+     * {@link #setLayoutOptions}. Re-applied on every subsequent
+     * {@link #setLayout} call so users keep their tuned FA2 parameters
+     * when they switch algorithms and back. {@code Map.of()} ⇒ no
+     * options have been pushed yet.
+     */
+    private volatile Map<String, Object> currentLayoutOptions = Map.of();
 
     private final java.util.List<NodeSelectionListener> nodeSelectionListeners = new CopyOnWriteArrayList<>();
     private final java.util.List<RelationshipSelectionListener> relSelectionListeners = new CopyOnWriteArrayList<>();
@@ -256,7 +264,12 @@ public class GraphViewer extends Browser {
     public void setLayout(LayoutAlgorithm algorithm) {
         if (algorithm == null) return;
         this.currentLayout = algorithm;
-        runWhenReady(() -> bridge.setLayout(algorithm.name()));
+        runWhenReady(() -> {
+            bridge.setLayout(algorithm.name());
+            if (!currentLayoutOptions.isEmpty()) {
+                bridge.setLayoutOptions(currentLayoutOptions);
+            }
+        });
     }
 
     public LayoutAlgorithm currentLayout() {
@@ -306,8 +319,28 @@ public class GraphViewer extends Browser {
         runWhenReady(() -> bridge.setAutoFitOnStabilization(enabled));
     }
 
+    public boolean isAutoFitOnStabilization() { return autoFitOnStabilization; }
+
     public void setOption(String key, Object value) {
         runWhenReady(() -> bridge.setOption(key, value));
+    }
+
+    /**
+     * vis-network counterpart of
+     * {@link CytoscapeViewer#setLayoutOptions(java.util.Map)}. Persists the
+     * option map on the viewer so a subsequent {@link #setLayout} call
+     * re-applies the same tuning. Pairs with
+     * {@link de.tk.dependencyanalyse.rapui.visgraph.ForceAtlasOptions} for
+     * the vis-network Cluster-Layout-Strategie.
+     */
+    public void setLayoutOptions(Map<String, Object> options) {
+        this.currentLayoutOptions = options == null ? Map.of() : Map.copyOf(options);
+        runWhenReady(() -> bridge.setLayoutOptions(currentLayoutOptions));
+    }
+
+    /** @return the most recent layout-option map (immutable copy). */
+    public Map<String, Object> currentLayoutOptions() {
+        return currentLayoutOptions;
     }
 
     /**

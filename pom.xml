@@ -33,6 +33,10 @@
             <id>eclipse-rap</id>
             <url>https://repo.eclipse.org/content/repositories/rap-releases/</url>
         </repository>
+        <repository>
+            <id>central</id>
+            <url>https://repo.maven.apache.org/maven2/</url>
+        </repository>
     </repositories>
 
     <dependencies>
@@ -53,6 +57,31 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+          GraalVM JS engine for the Cytoscape viewer end-to-end test. We
+          host the real cytoscape-viewer.js source inside a GraalJS
+          engine with a mocked window/DOM/cytoscape so we can verify
+          that the Java CytoscapeJsBridge.applyData() → JavaScript
+          cgv_setData() → applyElements() → cy.add() pipeline actually
+          carries the graph data through to the Cytoscape instance.
+          Without this test the "autoLoadFallback disabled" regression
+          could ship unnoticed — a Java→JS ordering bug would silently
+          drop the elements array and the user would see an empty
+          canvas.
+
+          Note: the graal-js artifact lives under
+          {@code org.graalvm.js:js-language} (the {@code org.graalvm.js:js}
+          POM is a meta-package with no JAR). js-language pulls in
+          GraalVM polyglot, the JS engine itself, and the standard JS
+          library.
+        -->
+        <dependency>
+            <groupId>org.graalvm.js</groupId>
+            <artifactId>js-language</artifactId>
+            <version>24.1.0</version>
             <scope>test</scope>
         </dependency>
 

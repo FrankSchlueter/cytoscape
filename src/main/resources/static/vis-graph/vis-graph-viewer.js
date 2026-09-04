@@ -364,8 +364,12 @@
             };
             return;
         }
-        // The graph is being replaced — drop any active legend highlight
-        // because the cached match-set would point at stale node ids.
+        // The graph is being replaced — release any in-flight Cluster-Layout
+        // state so the new dataset starts clean (no pinned anchors, no
+        // deferred edges held back from the old run).
+        releasePendingLayoutState();
+        // Drop any active legend highlight because the cached match-set
+        // would point at stale node ids.
         if (activeLegendColor) {
             activeLegendColor = null;
             renderLegendPanel();
@@ -387,6 +391,7 @@
     };
 
     window.vgv_clear = function () {
+        releasePendingLayoutState();
         if (networkReady && nodes && edges) {
             nodes.clear();
             edges.clear();
@@ -405,15 +410,187 @@
 
     /* ----- API: layout & physics ----- */
 
+    /**
+     * vis-network Cluster-Layout-Strategie payload. Holds the option map
+     * pushed via {@code vgv_setLayoutOptions} so that subsequent
+     * {@code vgv_setLayout('FORCE_ATLAS_2D')} calls re-apply the same
+     * FA2 tuning. Cleared by {@code vgv_dispose}.
+     */
+    var currentLayoutOptions = null;
+
+    /**
+     * Module-level state for the in-flight Cluster-Layout run. Held
+     * outside any function-local closure so that a second
+     * {@code vgv_setLayoutOptions} call (or {@code vgv_setLayout},
+     * {@code vgv_setData}, {@code vgv_dispose}) can deterministically
+     * release everything the previous run had deferred or pinned.
+     *
+     * <p>The bug this guards against: if {@code vgv_setLayoutOptions} is
+     * called twice in quick succession (e.g. Java's
+     * {@link GraphConfigurationDialog#applyLeidenClustering} invokes
+     * {@code setLayoutOptions(opts)} followed by
+     * {@code setLayout(FORCE_ATLAS_2D)} and {@code GraphViewer.setLayout}
+     * also re-pushes the options), the first run's deferred edges can
+     * stay removed indefinitely if the {@code stabilized} event of the
+     * second run supersedes the first listener and the fallback timer
+     * races with the network re-init. Keeping the state here lets every
+     * entry point enforce idempotent cleanup before doing anything else.</p>
+     */
+    var pendingDeferredEdges = null;   // Array<{id, ...originalFields}>
+    var pendingPinnedNodes = null;     // Array<nodeId>
+    var pendingFallbackTimer = null;   // setTimeout handle for cleanup fallback
+    var pendingStabilizedOff = null;   // function that deregisters the 'stabilized' listener
+    var pendingPollTimer = null;       // setTimeout handle for position-polling fallback
+    var pendingMassUpdates = null;     // Array<{id, mass}> for per-node mass-reset on cleanup
+
+    /**
+     * Release everything the previous Cluster-Layout run still holds:
+     * re-add the weak edges that were removed by the pre-layout filter,
+     * unpin the cluster anchors, cancel the fallback timer, and
+     * detach the {@code stabilized} listener. Idempotent — safe to call
+     * from {@code vgv_setLayoutOptions}, {@code vgv_setLayout},
+     * {@code vgv_setData} and {@code vgv_dispose}.
+     *
+     * <p>The {@code skipDetach} flag is set when we're already inside the
+     * {@code stabilized} handler — calling {@code network.off(...)} from
+     * within its own listener is unsafe on some vis-network builds.</p>
+     */
+    function releasePendingLayoutState(skipDetach) {
+        var cleanupStart = Date.now();
+        if (pendingFallbackTimer != null) {
+            try { clearTimeout(pendingFallbackTimer); } catch (e) { /* ignore */ }
+            pendingFallbackTimer = null;
+        }
+        if (pendingPollTimer != null) {
+            try { clearTimeout(pendingPollTimer); } catch (e) { /* ignore */ }
+            pendingPollTimer = null;
+        }
+        if (!skipDetach && typeof pendingStabilizedOff === 'function') {
+            try { pendingStabilizedOff(); } catch (e) { /* ignore */ }
+            pendingStabilizedOff = null;
+        }
+        // Re-add deferred edges. Filter out any whose IDs are
+        // already in the DataSet (race-condition guard) to avoid
+        // vis-network warnings when a previous cleanup already
+        // restored them.
+        if (pendingDeferredEdges && pendingDeferredEdges.length && edges) {
+            var toReAdd = [];
+            pendingDeferredEdges.forEach(function (d) {
+                if (d && d.id && !edges.get(d.id)) toReAdd.push(d);
+            });
+            if (toReAdd.length) {
+                try {
+                    edges.add(toReAdd);
+                    console.log('[VGV] cleanup: re-added '
+                            + toReAdd.length + '/' + pendingDeferredEdges.length
+                            + ' deferred edges');
+                } catch (err) {
+                    console.error('[VGV] cleanup: edges.add FAILED for '
+                            + toReAdd.length + ' edges', err);
+                }
+            }
+        }
+        pendingDeferredEdges = null;
+        // Reset orphan mass BEFORE the anchor unpinning so the
+        // anchor nodes don't get yanked around while their masses
+        // are still reduced.
+        if (pendingMassUpdates && pendingMassUpdates.length && nodes) {
+            var massResets = pendingMassUpdates.map(function (u) {
+                return { id: u.id, mass: 1.0 };
+            });
+            try { nodes.update(massResets); } catch (err) {
+                console.error('[VGV] cleanup: mass reset FAILED', err);
+            }
+        }
+        pendingMassUpdates = null;
+        if (pendingPinnedNodes && pendingPinnedNodes.length && nodes) {
+            var unpinned = pendingPinnedNodes.map(function (id) {
+                return { id: id, fixed: { x: false, y: false } };
+            });
+            try { nodes.update(unpinned); } catch (err) {
+                console.error('[VGV] cleanup: unpin FAILED', err);
+            }
+        }
+        pendingPinnedNodes = null;
+        console.log('[VGV] cleanup done in ' + (Date.now() - cleanupStart) + 'ms, '
+                + 'edgesNow=' + (edges ? edges.length : 'n/a'));
+    }
+
+    /**
+     * Position-polling fallback: when neither the 'stabilized'
+     * event nor the 1.5 s fallback timer fires (e.g. physics was
+     * just toggled and FA2 never settles into a true stable state),
+     * this loop samples the first 10 node positions every 200 ms
+     * and triggers {@link releasePendingLayoutState} once the
+     * movement drops below {@code MOVEMENT_TOLERANCE_PX} for
+     * {@code STABLE_THRESHOLD_FRAMES} consecutive frames.
+     *
+     * <p>Hard cap: 30 polls (~6 s) so a never-stabilising graph
+     * doesn't pin anchors / defer edges forever.</p>
+     */
+    function startPositionPollingForCleanup() {
+        if (pendingPollTimer != null) return;
+        var lastPositions = {};
+        var stableFrames = 0;
+        var STABLE_THRESHOLD_FRAMES = 3;
+        var MOVEMENT_TOLERANCE_PX = 1.0;
+        var POLL_INTERVAL_MS = 200;
+        var MAX_POLLS = 30;
+        var pollCount = 0;
+
+        function pollOnce() {
+            pollCount++;
+            if (!network || !nodes || pollCount > MAX_POLLS) {
+                pendingPollTimer = null;
+                return;
+            }
+            var sample = nodes.get().slice(0, 10);
+            var movement = 0;
+            sample.forEach(function (n) {
+                var prev = lastPositions[n.id];
+                var x = n.x || 0, y = n.y || 0;
+                if (prev) movement += Math.abs(x - prev.x) + Math.abs(y - prev.y);
+                lastPositions[n.id] = { x: x, y: y };
+            });
+            if (movement < MOVEMENT_TOLERANCE_PX) {
+                stableFrames++;
+                if (stableFrames >= STABLE_THRESHOLD_FRAMES) {
+                    console.log('[VGV] poll: positions stable for '
+                            + STABLE_THRESHOLD_FRAMES + ' frames — early cleanup');
+                    releasePendingLayoutState();
+                    return;
+                }
+            } else {
+                stableFrames = 0;
+            }
+            pendingPollTimer = setTimeout(pollOnce, POLL_INTERVAL_MS);
+        }
+        pendingPollTimer = setTimeout(pollOnce, POLL_INTERVAL_MS);
+    }
+
     window.vgv_setLayout = function (algorithm) {
         if (!network) return;
+        // Switching away from FORCE_ATLAS_2D (or into any other solver)
+        // must release any deferred edges / pinned anchors that the
+        // previous Cluster-Layout run still holds — otherwise the
+        // anchors stay pinned forever and the deferred edges never
+        // come back.
+        releasePendingLayoutState();
         var opts = {
             layout: { hierarchical: { enabled: false } },
             physics: { enabled: true }
         };
         switch (algorithm) {
             case 'FORCE_ATLAS_2D':
-                opts.physics = { enabled: true, solver: 'forceAtlas2Based' };
+                if (currentLayoutOptions && currentLayoutOptions.physics) {
+                    // Re-apply the full FA2 tuning the Java side pushed
+                    // (gravitationalConstant, centralGravity, ...). When
+                    // the user hasn't pushed any options yet, fall back
+                    // to a bare solver switch.
+                    opts.physics = JSON.parse(JSON.stringify(currentLayoutOptions.physics));
+                } else {
+                    opts.physics = { enabled: true, solver: 'forceAtlas2Based' };
+                }
                 break;
             case 'BARNES_HUT':
                 opts.physics = { enabled: true, solver: 'barnesHut' };
@@ -442,6 +619,205 @@
             // GRID and CIRCULAR are NVL-only and ignored by vis-network.
         }
         network.setOptions(opts);
+    };
+
+    /**
+     * Apply a JSON layout-option map produced by
+     * {@code ForceAtlasOptions.buildOptions} on the Java side. Implements
+     * the vis-network half of the Cluster-Layout-Strategie
+     * (Cluster-Layout.md):
+     * <ol>
+     *   <li><b>Pre-Layout Edge-Filter</b> — edges whose {@code logWeight}
+     *       is below {@code prefilterMinLogWeight} are removed from the
+     *       DataSet and re-added after the layout has stabilized. Without
+     *       this the strong edges would have to share spring time with a
+     *       long tail of low-weight background noise.</li>
+     *   <li><b>Per-Edge Lengths</b> — each entry in {@code edgeLengths}
+     *       overrides vis-network's global {@code springLength} for that
+     *       single edge, so heavy-weight edges are pulled tight while
+     *       weak ones stay loose.</li>
+     *   <li><b>Cluster Anchors</b> — for every Leiden community the
+     *       highest-weighted-degree node is pinned to the supplied grid
+     *       coordinate via {@code fixed: {x: true, y: true}}. The pin is
+     *       released on the {@code stabilized} event so the node can
+     *       respond to subsequent physics events.</li>
+     *   <li><b>FA2 Physics</b> — the full {@code physics} block is pushed
+     *       via {@code network.setOptions}, then {@code stabilize()} runs
+     *       the configured number of iterations.</li>
+     * </ol>
+     *
+     * The option map is cached in {@code currentLayoutOptions} so a
+     * later {@code vgv_setLayout('FORCE_ATLAS_2D')} call re-applies the
+     * same tuning.
+     */
+    window.vgv_setLayoutOptions = function (options) {
+        currentLayoutOptions = options || null;
+        if (!network) return;
+        if (!options) return;
+
+        // Diagnostic snapshot for the start of a Cluster-Layout run.
+        var thresholdEarly = (typeof options.prefilterMinLogWeight === 'number')
+                ? options.prefilterMinLogWeight : 0;
+        console.log('[VGV] setLayoutOptions start: threshold=' + thresholdEarly
+                + ', totalEdges=' + (edges ? edges.length : 'n/a')
+                + ', prefilter=' + (thresholdEarly > 0 ? 'active' : 'off')
+                + ', physicsEnabled=' + !!(network.physics && network.physics.physicsEnabled));
+
+        // 0) Defensive cleanup: a previous run may still hold deferred
+        //    edges / pinned anchors if Java called us twice in quick
+        //    succession. Release them BEFORE we start a new run so the
+        //    DataSet is in a known state when we sample edges below.
+        releasePendingLayoutState();
+
+        // 1) Pre-Layout Edge-Filter
+        var deferredData = [];
+        var threshold = (typeof options.prefilterMinLogWeight === 'number')
+                ? options.prefilterMinLogWeight : 0;
+        if (threshold > 0 && edges) {
+            edges.forEach(function (e) {
+                if (!e) return;
+                var lw = (typeof e.logWeight === 'number') ? e.logWeight : 0;
+                if (lw > 0 && lw < threshold) {
+                    // Capture the original payload so we can re-add the
+                    // edge with its original weight / logWeight / length.
+                    var copy = {};
+                    for (var k in e) { if (Object.prototype.hasOwnProperty.call(e, k)) copy[k] = e[k]; }
+                    deferredData.push(copy);
+                }
+            });
+            if (deferredData.length) {
+                var deferredIds = deferredData.map(function (d) { return d.id; });
+                try { edges.remove(deferredIds); } catch (err) {
+                    console.warn('vgv_setLayoutOptions: edge remove failed', err);
+                    // If remove failed, abort the filter step — keeping
+                    // the DataSet intact is more important than enforcing
+                    // the threshold on this run.
+                    deferredData = [];
+                }
+            }
+        }
+        pendingDeferredEdges = deferredData;
+
+        // 2) Per-edge length interpolation
+        if (options.edgeLengths && edges) {
+            var updates = [];
+            Object.keys(options.edgeLengths).forEach(function (id) {
+                updates.push({ id: id, length: options.edgeLengths[id] });
+            });
+            if (updates.length) {
+                try { edges.update(updates); } catch (err) {
+                    console.warn('vgv_setLayoutOptions: edge length update failed', err);
+                }
+            }
+        }
+
+        // 3) Pin cluster anchors
+        var pinned = [];
+        if (options.clusterCentroids && nodes) {
+            Object.keys(options.clusterCentroids).forEach(function (nodeId) {
+                var c = options.clusterCentroids[nodeId];
+                if (!c || typeof c.x !== 'number' || typeof c.y !== 'number') return;
+                try {
+                    nodes.update({
+                        id: nodeId,
+                        x: c.x,
+                        y: c.y,
+                        fixed: { x: true, y: true }
+                    });
+                    pinned.push(nodeId);
+                } catch (err) {
+                    console.warn('vgv_setLayoutOptions: anchor pin failed for ' + nodeId, err);
+                }
+            });
+        }
+        pendingPinnedNodes = pinned;
+
+        // 3b) Per-node mass for isolated nodes (orphans). vis-network's
+        //     FA2 solver treats lighter nodes as more movable, so
+        //     mass=0.3 makes degree-0 nodes drift away from clusters.
+        //     Reset to 1.0 happens in releasePendingLayoutState right
+        //     before the anchor unpinning.
+        if (options.isolatedNodeIds && options.isolatedNodeIds.length && nodes) {
+            var mass = (typeof options.isolatedNodeMass === 'number')
+                    ? options.isolatedNodeMass : 0.3;
+            var massUpdates = options.isolatedNodeIds.map(function (id) {
+                return { id: id, mass: mass };
+            });
+            try {
+                nodes.update(massUpdates);
+                pendingMassUpdates = massUpdates;
+                console.log('[VGV] setLayoutOptions: mass=' + mass
+                        + ' assigned to ' + massUpdates.length + ' orphans');
+            } catch (err) {
+                console.warn('[VGV] setLayoutOptions: mass update failed', err);
+            }
+        }
+
+        // 4) Push physics + stabilise
+        if (options.physics) {
+            try { network.setOptions(options.physics); } catch (err) {
+                console.warn('vgv_setLayoutOptions: physics setOptions failed', err);
+            }
+        }
+        var iters = (options.physics && options.physics.stabilization
+                     && options.physics.stabilization.iterations) || 1000;
+
+        // 5) Schedule the post-stabilization cleanup. Two paths release
+        //    pendingDeferredEdges / pendingPinnedNodes:
+        //      a) network.once('stabilized', ...) — fires once the
+        //         physics solver converges. The handler is captured so
+        //         a new run (or dispose) can deregister it.
+        //      b) a 3 s setTimeout fallback — covers the cases where
+        //         'stabilized' never fires (physics disabled, empty
+        //         graph, FA2 oscillating, RAF stopped). 3 s is
+        //         empirically enough for a 1000-iter FA2 run on a
+        //         ~1000-edge graph; longer than this and the user has
+        //         likely switched context anyway.
+        //
+        //    Both paths store a handle so releasePendingLayoutState()
+        //    can cancel them when a new run starts.
+        var onStabilized = function () {
+            // We're inside the 'stabilized' listener — calling
+            // network.off() from here would be a no-op anyway, and on
+            // some vis-network builds it throws. Skip the detach.
+            pendingStabilizedOff = null;
+            releasePendingLayoutState(true);
+        };
+        pendingStabilizedOff = function () {
+            if (typeof network.off === 'function') {
+                try { network.off('stabilized', onStabilized); } catch (e) { /* ignore */ }
+            }
+        };
+        try {
+            network.once('stabilized', onStabilized);
+        } catch (err) {
+            // network.once unavailable → rely on the fallback only.
+            pendingStabilizedOff = null;
+        }
+        // stabilize()-guard: ForceAtlas2 silently refuses to stabilise
+        // when physics was just toggled off and back on. Detect and
+        // re-enable explicitly so the user actually sees the cluster
+        // layout converge (without this, the graph freezes on its
+        // pre-apply positions because the 'stabilized' event never fires).
+        try {
+            var physEnabled = !!(network.physics && network.physics.physicsEnabled);
+            if (!physEnabled) {
+                console.warn('[VGV] stabilize: physics was disabled — re-enabling');
+                network.setOptions({ physics: { enabled: true } });
+            }
+        } catch (e) {
+            console.warn('[VGV] stabilize: introspection failed', e);
+        }
+        try {
+            network.stabilize(iters);
+        } catch (err) {
+            console.warn('vgv_setLayoutOptions: stabilize failed', err);
+        }
+        // Shorter fallback timer (1.5 s instead of 3 s) plus the
+        // position-polling fallback so cleanup still fires when
+        // 'stabilized' is never delivered.
+        pendingFallbackTimer = setTimeout(releasePendingLayoutState, 1500);
+        startPositionPollingForCleanup();
     };
 
     window.vgv_setPhysics = function (enabled) {
@@ -809,6 +1185,47 @@
     }
 
     /* ----- bootstrap ----- */
+
+    window.vgv_dispose = function () {
+        // Drop the cached Cluster-Layout options so the next
+        // GraphViewer instance starts with a clean slate.
+        currentLayoutOptions = null;
+        try { clearLegendHighlight(); } catch (e) { /* ignore */ }
+        var legend = document.getElementById('vgv-legend');
+        if (legend && legend.parentNode) legend.parentNode.removeChild(legend);
+        var ctx = document.getElementById('vgv-context-menu');
+        if (ctx && ctx.parentNode) ctx.parentNode.removeChild(ctx);
+    };
+
+    // Diagnostic hook, only active with ?vgvDebug=1 in the URL.
+    // Exposes pending state + manual cleanup for live debugging.
+    if (typeof location !== 'undefined'
+            && location.search && location.search.indexOf('vgvDebug=1') >= 0) {
+        window.__vgvTest = {
+            forceCleanup: function () {
+                console.log('[VGV] manual cleanup triggered');
+                releasePendingLayoutState();
+            },
+            getPendingState: function () {
+                return {
+                    deferred: pendingDeferredEdges
+                            ? pendingDeferredEdges.length : 0,
+                    pinned: pendingPinnedNodes
+                            ? pendingPinnedNodes.length : 0,
+                    isolatedMassUpdates: pendingMassUpdates
+                            ? pendingMassUpdates.length : 0,
+                    timerActive: pendingFallbackTimer != null,
+                    pollActive: pendingPollTimer != null,
+                    physicsEnabled: !!(network && network.physics
+                            && network.physics.physicsEnabled),
+                    edgesTotal: edges ? edges.length : 0,
+                    nodesTotal: nodes ? nodes.length : 0
+                };
+            },
+            getCurrentLayoutOptions: function () { return currentLayoutOptions; }
+        };
+        console.log('[VGV] debug hook enabled — try window.__vgvTest');
+    }
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);

@@ -37,6 +37,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Engine-agnostic configuration dialog for graph visualization, driven by
@@ -73,6 +75,8 @@ import java.util.TreeSet;
  * {@link SwitchingViewer#setNodeConfig(NodeConfig)}.</p>
  */
 public class GraphConfigurationDialog extends Dialog {
+
+    private static final Logger LOG = Logger.getLogger(GraphConfigurationDialog.class.getName());
 
     /** Cap on per-property distinct values for tag-color assignment. */
     private static final int MAX_TAG_VALUES = 20;
@@ -126,6 +130,7 @@ public class GraphConfigurationDialog extends Dialog {
 
     private Button leidenApplyButton;
     private Combo leidenThresholdCombo;
+    private Button isolateOrphansCheck;
     private Label leidenStatus;
 
     private Button closeButton;
@@ -343,8 +348,30 @@ public class GraphConfigurationDialog extends Dialog {
         thresholdLabel.setText("Min. ln(weight+1) fürs Layout:");
         leidenThresholdCombo = new Combo(thresholdRow, SWT.READ_ONLY | SWT.DROP_DOWN);
         leidenThresholdCombo.setItems(formatThresholdLabels(ClusterLayoutOptions.THRESHOLD_STUFEN));
-        // Default = 2.0 (index 3) — corresponds to weight ≥ e^2 − 1 ≈ 6.39.
-        leidenThresholdCombo.select(ClusterLayoutOptions.DEFAULT_THRESHOLD_INDEX);
+        // Default = "aus" (index -1 ⇒ MIN_LOG_WEIGHT_OFF). The pre-layout
+        // edge filter was confusing new users because nodes appeared
+        // isolated during the brief window before the post-stabilisation
+        // cleanup re-added the weak edges. Power users can still pick a
+        // threshold from the dropdown.
+        leidenThresholdCombo.select(-1);
+
+        // Per-node mass reduction for degree-0 nodes (orphans). When
+        // enabled, vis-network's FA2 treats them as lighter → they drift
+        // to the periphery instead of stacking up inside a cluster's
+        // bounding box. Default ON because new users regularly have
+        // orphans in their sample data and otherwise see a confusing
+        // overlap.
+        isolateOrphansCheck = new Button(shell, SWT.CHECK);
+        isolateOrphansCheck.setText(
+                "Isolierte Knoten räumlich trennen (mass=0.3)");
+        isolateOrphansCheck.setSelection(true);
+        isolateOrphansCheck.setLayoutData(
+                new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+        isolateOrphansCheck.setToolTipText(
+                "Knoten ohne Edges bekommen reduzierte Masse, damit FA2 "
+                + "sie aus den Clustern herausdrängt. Ohne diesen Effekt "
+                + "bleiben sie typischerweise im nächstgelegenen Cluster "
+                + "hängen.");
 
         leidenStatus = new Label(shell, SWT.NONE);
         leidenStatus.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
@@ -852,9 +879,90 @@ public class GraphConfigurationDialog extends Dialog {
             leidenStatus.setText("Cluster-Layout aktiv: " + distinct
                     + " Communities, fcose-Compound-Strategie (Cytoscape, " + filterNote + ").");
         } else {
-            leidenStatus.setText("Clustering angewendet: " + distinct
-                    + " Communities. Hinweis: Cluster-Layout (Compound-Boxen) ist nur in der"
-                    + " Cytoscape-Engine verfügbar – vis-network nutzt weiterhin die eingefärbten Knoten.");
+            // vis-network engine: per-edge length interpolation, per-community
+            // anchor pinning, and the pre-layout edge-filter — all from
+            // ForceAtlasOptions (vis-network counterpart of ClusterLayoutOptions).
+            //
+            // Note: we deliberately do NOT also call setLayout(FORCE_ATLAS_2D)
+            // here. vgv_setLayoutOptions on the JS side already pushes the
+            // full physics block (solver + forceAtlas2Based tuning +
+            // stabilization.iterations) and calls network.stabilize(). A
+            // second setLayout call would re-enter vgv_setLayoutOptions
+            // (because GraphViewer.setLayout re-pushes currentLayoutOptions),
+            // run the pre-layout edge-filter a second time, and risk leaving
+            // weak edges removed indefinitely if the second stabilization
+            // supersedes the first 'stabilized' listener.
+            double threshold = currentLeidenThreshold();
+            int totalEdges = data.getRelationships().size();
+            int passing = countEdgesAboveThreshold(threshold);
+            boolean physicsWasOff = false;
+            // Cluster-Layout needs the simulation to actually move
+            // nodes. If the user has disabled physics via the
+            // control-bar checkbox, re-enable it for this run; they
+            // can still freeze it afterwards via the same checkbox.
+            // Failure is non-fatal — setLayoutOptions is still applied
+            // so the option map stays consistent, even if the
+            // visualization doesn't react.
+            if (!viewer.isPhysicsEnabled()) {
+                try {
+                    viewer.setPhysics(true);
+                    physicsWasOff = true;
+                } catch (Exception ex) {
+                    LOG.log(Level.WARNING,
+                            "applyLeidenClustering: re-enabling physics failed", ex);
+                }
+            }
+            int[] vp = viewer.getViewportSize();
+            Double vpW = (vp[0] >= ForceAtlasOptions.MIN_VIEWPORT_PX)
+                    ? (double) vp[0] : null;
+            Double vpH = (vp[1] >= ForceAtlasOptions.MIN_VIEWPORT_PX)
+                    ? (double) vp[1] : null;
+            boolean isolateOrphans = isolateOrphansCheck != null
+                    && isolateOrphansCheck.getSelection();
+            viewer.setLayoutOptions(
+                    ForceAtlasOptions.buildOptions(
+                            data, colors, threshold, vpW, vpH, isolateOrphans));
+            String filterNote;
+            if (threshold <= ForceAtlasOptions.MIN_LOG_WEIGHT_OFF) {
+                filterNote = "alle " + totalEdges + " Edges im Layout";
+            } else {
+                filterNote = passing + "/" + totalEdges
+                        + " Edges im Layout (≥ ln(w+1)=" + threshold + ")";
+            }
+            String suffix = "";
+            if (physicsWasOff) {
+                suffix = " (Physics aktiviert für Stabilisierung)";
+            }
+            if (threshold > ForceAtlasOptions.MIN_LOG_WEIGHT_OFF) {
+                suffix += " — Edges werden temporär aus dem Layout entfernt "
+                        + "und nach Stabilisierung wieder hinzugefügt";
+            }
+            String gridInfo = "";
+            if (vpW != null && vpH != null) {
+                // Grid-Auflösung direkt aus dem Helper berechnen — der
+                // Viewer hält zwar das letzte Options-Map, aber das
+                // erneute Lesen spart eine Indirektion und vermeidet
+                // jede Kopplung an den internen Cache.
+                double[] grid = ForceAtlasOptions.computeGridLayout(
+                        (int) distinct, vpW, vpH);
+                int gridCols = (int) grid[0];
+                int gridRows = (int) grid[1];
+                gridInfo = ", Grid " + gridCols + "×" + gridRows
+                        + " bildschirmadaptiv (" + vp[0] + "×" + vp[1] + " px)";
+            }
+            // Isolated-node info — read the count back from the helper
+            // rather than re-computing it (keeps a single source of
+            // truth and survives the optional isolateOrphans toggle).
+            String isolationInfo = "";
+            List<String> isolated = ForceAtlasOptions.computeIsolatedNodeIds(data);
+            if (isolateOrphans && !isolated.isEmpty()) {
+                isolationInfo = ", " + isolated.size()
+                        + " isolierte Nodes abgestoßen (mass="
+                        + ForceAtlasOptions.ISOLATED_NODE_MASS + ")";
+            }
+            leidenStatus.setText("Cluster-Layout aktiv: " + distinct
+                    + " Communities, FA2 mit log-gewichteten Kanten (vis, "
+                    + filterNote + ")" + suffix + gridInfo + isolationInfo + ".");
         }
 
         // Refresh the legend preview + push it so the panel updates

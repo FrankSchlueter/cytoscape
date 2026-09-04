@@ -239,6 +239,18 @@ public final class GraphRelationship {
             if ("label".equals(k) || "title".equals(k)) continue;
             out.put(k, e.getValue());
         }
+        // Surface weight + pre-computed logWeight so the vis-network
+        // Cluster-Layout-Strategie (Cluster-Layout.md §3) can derive
+        // per-edge length and filter thresholds directly in
+        // vis-graph-viewer.js without a second roundtrip. Cytoscape's
+        // toCytoscapeEdge() does the same — see CytoscapeViewer for the
+        // fcose counterpart. Missing / non-positive weight → both fields
+        // are omitted; the JS side falls back to its own defaults.
+        Double w = getWeight();
+        if (w != null && w > 0) {
+            out.put("weight", w);
+            out.put("logWeight", Math.log10(w + 1.0));
+        }
         return out;
     }
 

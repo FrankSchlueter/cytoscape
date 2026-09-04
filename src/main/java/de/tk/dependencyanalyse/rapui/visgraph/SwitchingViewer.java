@@ -112,6 +112,9 @@ public class SwitchingViewer extends Composite {
             if (currentData != null) visViewer.setGraphData(currentData);
             if (currentNodeConfig != null) visViewer.setNodeConfig(currentNodeConfig);
             visViewer.setLayout(currentLayout);
+            if (!currentLayoutOptions.isEmpty()) {
+                visViewer.setLayoutOptions(currentLayoutOptions);
+            }
             if (!currentLeidenColors.isEmpty()) {
                 visViewer.setLeidenClusterColors(currentLeidenColors);
             }
@@ -189,6 +192,8 @@ public class SwitchingViewer extends Composite {
         this.currentLayoutOptions = options == null ? Map.of() : Map.copyOf(options);
         if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
             cytoscapeViewer.setLayoutOptions(currentLayoutOptions);
+        } else if (visViewer != null) {
+            visViewer.setLayoutOptions(currentLayoutOptions);
         }
     }
 
@@ -267,6 +272,58 @@ public class SwitchingViewer extends Composite {
         } else if (visViewer != null) {
             visViewer.clear();
         }
+    }
+
+    /* ---- viewport / sizing ---- */
+
+    /**
+     * @return the current composite size as {@code [width, height]} in
+     *         pixels. For both engines this is the Browser widget size,
+     *         which equals the iframe canvas size. Returns
+     *         {@code [0, 0]} when the composite is not yet laid out
+     *         (e.g. during construction); callers MUST treat that as
+     *         "fall back to default sizing".
+     */
+    public int[] getViewportSize() {
+        if (isDisposed()) return new int[]{0, 0};
+        org.eclipse.swt.graphics.Point p = getSize();
+        return new int[]{p.x, p.y};
+    }
+
+    /* ---- physics & auto-fit (vis-only, no-op for Cytoscape) ---- */
+
+    /**
+     * Forward to the active vis-network viewer if present. Cytoscape has
+     * no physics concept, so the call is silently ignored when the
+     * active engine is Cytoscape.
+     */
+    public void setPhysics(boolean enabled) {
+        if (visViewer != null) visViewer.setPhysics(enabled);
+    }
+
+    /**
+     * @return the active vis-network viewer's physics-enabled flag, or
+     *         {@code true} when Cytoscape is active (no physics = always
+     *         "enabled" from the user's perspective).
+     */
+    public boolean isPhysicsEnabled() {
+        if (visViewer != null) return visViewer.isPhysicsEnabled();
+        return true;
+    }
+
+    /**
+     * Forward to the active vis-network viewer if present. Cytoscape's
+     * fcose layout always runs with {@code fit:true} and ignores this
+     * flag.
+     */
+    public void setAutoFitOnStabilization(boolean enabled) {
+        if (visViewer != null) visViewer.setAutoFitOnStabilization(enabled);
+    }
+
+    /** @see #setAutoFitOnStabilization(boolean) */
+    public boolean isAutoFitOnStabilization() {
+        if (visViewer != null) return visViewer.isAutoFitOnStabilization();
+        return true;
     }
 
     /* ---- selection listeners ---- */

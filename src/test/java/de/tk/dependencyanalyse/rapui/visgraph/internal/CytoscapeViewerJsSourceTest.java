@@ -122,7 +122,7 @@ class CytoscapeViewerJsSourceTest {
 
         // Find every call site of preloadSvgImagesAndRedraw(); there must
         // be at least three: applyElements, cgv_applyNodeConfig,
-        // cgv_applyLeidenColors. autoLoadFallback has its own merge site.
+        // cgv_applyLeidenColors.
         // We match the closing `()` on its own line so we don't accidentally
         // count the definition `function preloadSvgImagesAndReddraw()`.
         Pattern call = Pattern.compile("preloadSvgImagesAndRedraw\\(\\)\\s*;");
@@ -208,11 +208,11 @@ class CytoscapeViewerJsSourceTest {
     @Test
     void imageNodeStyleIsAppendedAfterAllDefaultsInEveryStylePush() throws Exception {
         // In every place the bridge replaces the stylesheet
-        // (applyNodeConfig, applyLeidenColors, autoLoadFallback's Leiden
-        // apply path) we must put imageNodeStyle() at the END of the
-        // merged array. Cytoscape applies the LAST matching rule, so a
-        // late entry is what guarantees background-image wins over
-        // background-color from tag / Leiden overrides.
+        // (applyNodeConfig, applyLeidenColors) we must put
+        // imageNodeStyle() at the END of the merged array. Cytoscape
+        // applies the LAST matching rule, so a late entry is what
+        // guarantees background-image wins over background-color from
+        // tag / Leiden overrides.
         //
         // Two patterns appear in the source:
         //   var merged = defaults.concat(styles).concat([imageNodeStyle()]);
@@ -511,6 +511,58 @@ class CytoscapeViewerJsSourceTest {
                 "clusterEdgeStyle must use sqrt-based sub-linear width scaling");
         assertTrue(fn.contains("logWeight"),
                 "clusterEdgeStyle must read the logWeight Cytoscape attribute");
+    }
+
+    @Test
+    void clusterEdgeStyleWidthIsFunctionNotString() throws Exception {
+        // Cytoscape's fromJson() does NOT evaluate function-shaped
+        // strings — it leaves them as literal strings, which Cytoscape
+        // then logs as "The style property `width: function(edge){...}`
+        // is invalid" and falls back to the default. The clusterEdgeStyle
+        // width must therefore be a real Function reference, not a
+        // stringified source. The earlier regression shipped the
+        // width as a quoted string ("'function(edge){...}'") which
+        // Cytoscape never called — every cluster edge rendered with the
+        // default 1px line. This test guards against that regression
+        // coming back.
+        String src = readViewerJs();
+        Pattern body = Pattern.compile(
+                "function clusterEdgeStyle\\s*\\(\\s*\\)\\s*\\{([\\s\\S]*?)\\n\\s{4}\\}");
+        Matcher m = body.matcher(src);
+        assertTrue(m.find(), "clusterEdgeStyle must be defined");
+        String fn = m.group(1);
+        // Locate the `'width':` line. The value follows the colon —
+        // for a real Function it spans multiple lines, for a string
+        // it ends on the same line. We capture the whole rest of
+        // the function body and inspect it.
+        int widthIdx = fn.indexOf("'width':");
+        assertTrue(widthIdx >= 0, "clusterEdgeStyle must define a 'width' style property");
+        String afterWidth = fn.substring(widthIdx);
+        // 1) Reject the stringified form. The earlier regression
+        //    was `'width': 'function(edge){...}'` — Cytoscape never
+        //    compiles that. If the very next non-whitespace character
+        //    after the colon is a quote, it's a string.
+        String trimmed = afterWidth.substring(afterWidth.indexOf(':') + 1).trim();
+        char firstChar = trimmed.isEmpty() ? ' ' : trimmed.charAt(0);
+        assertFalse(firstChar == '\'' || firstChar == '"',
+                "clusterEdgeStyle width must NOT be a stringified function — "
+                        + "Cytoscape.fromJson() does not compile function-shaped strings. "
+                        + "Found the value starting with: " + trimmed.substring(
+                                0, Math.min(80, trimmed.length())));
+        // 2) Confirm it IS a function (bare keyword `function` or arrow).
+        assertTrue(trimmed.startsWith("function") || trimmed.startsWith("(") || trimmed.contains("=>"),
+                "clusterEdgeStyle width must be a real Function reference. Found: "
+                        + trimmed.substring(0, Math.min(80, trimmed.length())));
+        // 3) The function body must still call Math.sqrt on logWeight
+        //    so the sub-linear scaling the cluster layout relies on
+        //    is preserved (linear mapData is not a faithful
+        //    replacement — see clusterEdgeStyle() comment for the
+        //    numerical comparison).
+        assertTrue(trimmed.contains("Math.sqrt"),
+                "the width function must use Math.sqrt for the sub-linear "
+                        + "scaling that prevents low-weight edges from disappearing. "
+                        + "If you intend to swap to Cytoscape's mapData, update this test "
+                        + "and re-validate the cluster-edge visual density.");
     }
 
     @Test
@@ -934,6 +986,89 @@ class CytoscapeViewerJsSourceTest {
         String src = readViewerJs();
         assertTrue(src.contains("Container size 0×0"),
                 "cytoscape-viewer.js must surface a hard-timeout error in #cgv-debug when the container never resizes");
+    }
+
+    /**
+     * Source-level guard for the boot-time BrowserFunction race.
+     *
+     * <p>RAP's rap-client.js installs the BrowserFunction wrappers
+     * (window.cgv_viewerReady, window.cgv_notifyNodeSelected, ...)
+     * on the iframe's window in its {@code _onload} handler, which
+     * runs AFTER this IIFE executes. A synchronous
+     * {@code javaCall('cgv_viewerReady')} from boot() races that
+     * install: the wrapper may not be on window yet, javaCall warns
+     * "BrowserFunction not registered", the Java side never sees
+     * viewerReady, and every queued setGraphData / setLayout call
+     * sits in pendingOps forever — exactly the bug that left the
+     * user staring at an empty canvas when the autoLoadFallback
+     * was disabled.</p>
+     *
+     * <p>The fix mirrors {@code waitForViewerReadyWrapper} in
+     * vis-graph-viewer.js: a polling helper that retries every
+     * 50 ms until {@code window.cgv_viewerReady} is a function. The
+     * CytoscapeViewerEndToEndTest provides the runtime guard; this
+     * test ensures the polling code does not regress to a direct
+     * {@code javaCall('cgv_viewerReady')} call site.</p>
+     */
+    @Test
+    void viewerReadyAnnounceIsPolledNotCalledDirectly() throws Exception {
+        String src = readViewerJs();
+        // 1) The polling helper must exist.
+        assertTrue(src.contains("function notifyViewerReady"),
+                "cytoscape-viewer.js must define a notifyViewerReady() helper "
+                        + "that polls for the rap-client wrapper on "
+                        + "window.cgv_viewerReady. Calling javaCall() "
+                        + "synchronously from boot() races the wrapper install "
+                        + "and breaks the user-facing data flow.");
+        // 2) Every call site that announces viewer-ready must go
+        //    through the helper, not directly through javaCall.
+        //    We scan for `javaCall('cgv_viewerReady')` and ignore
+        //    matches inside JSDoc comments (lines starting with `*`)
+        //    and inside the notifyViewerReady() body itself (the
+        //    helper is allowed to call javaCall() once the wrapper
+        //    is installed — that's its whole purpose).
+        int directCalls = 0;
+        int idx = 0;
+        while ((idx = src.indexOf("javaCall('cgv_viewerReady')", idx)) >= 0) {
+            // Skip if this is in a JSDoc comment block. JSDoc
+            // comments start with `*` (or `/**` for the opening).
+            int lineStart = src.lastIndexOf("\n", idx) + 1;
+            String line = src.substring(lineStart, idx);
+            boolean inJSDoc = line.contains("* ") || line.trim().startsWith("*")
+                    || line.contains("/**");
+            // Skip if this is inside the notifyViewerReady helper.
+            // Find the enclosing function: scan backwards for the
+            // nearest "function " keyword and check whether it is
+            // notifyViewerReady.
+            String preceding = src.substring(Math.max(0, idx - 600), idx);
+            int lastFn = preceding.lastIndexOf("function ");
+            boolean insideHelper = lastFn >= 0
+                    && preceding.substring(lastFn).contains("notifyViewerReady");
+            if (!inJSDoc && !insideHelper) {
+                directCalls++;
+            }
+            idx += 30;
+        }
+        assertEquals(0, directCalls,
+                "every cgv_viewerReady announce must go through notifyViewerReady() — "
+                        + "direct javaCall('cgv_viewerReady') calls race the "
+                        + "rap-client wrapper install. Found " + directCalls
+                        + " direct call site(s).");
+        // 3) The helper body must poll via setTimeout until the
+        //    wrapper exists.
+        Pattern helperBody = Pattern.compile(
+                "function notifyViewerReady\\s*\\(\\s*\\)\\s*\\{([\\s\\S]*?)\\n\\s{4}\\}");
+        Matcher m = helperBody.matcher(src);
+        assertTrue(m.find(), "notifyViewerReady function body must be present");
+        String body = m.group(1);
+        assertTrue(body.contains("window.cgv_viewerReady"),
+                "notifyViewerReady must check window.cgv_viewerReady existence");
+        assertTrue(body.contains("setTimeout"),
+                "notifyViewerReady must schedule a retry via setTimeout when the "
+                        + "wrapper is not yet installed");
+        assertTrue(body.contains("javaCall('cgv_viewerReady')"),
+                "notifyViewerReady must invoke javaCall('cgv_viewerReady') once the "
+                        + "wrapper is installed — that is the actual notify path");
     }
 
     @Test

@@ -90,13 +90,21 @@ public final class CytoscapeJsBridge {
 
     /**
      * Push the elements array to the iframe and call {@code window.cgv_setData()}.
+     *
+     * <p>Both statements are shipped in ONE atomic {@code evaluate()} call so
+     * the JS side never sees {@code cgv_setData()} fire before
+     * {@code window.__cgv_elements} has been assigned. Splitting them into two
+     * separate {@link BrowserScriptQueue#exec exec()} calls would still
+     * serialise them, but the JS bridge's {@code cgv_setData} early-returns
+     * when {@code __cgv_elements} is not yet set — that early-return is the
+     * safety net for partial / split deliveries, and folding both statements
+     * into one script eliminates the window entirely.</p>
      */
     public void applyData(GraphData data) {
         this.currentData = data;
         List<Map<String, Object>> elements = data.toCytoscapeElements(currentNodeConfig);
         LOG.info("CytoscapeJsBridge.applyData: " + elements.size() + " elements");
-        exec("window.__cgv_elements = " + gson.toJson(elements) + ";");
-        exec("window.cgv_setData();");
+        exec("window.__cgv_elements = " + gson.toJson(elements) + "; window.cgv_setData();");
     }
 
     /**

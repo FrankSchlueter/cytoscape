@@ -163,6 +163,22 @@ public final class VisJsBridge {
         exec("window.vgv_setLayout('" + algorithm + "');");
     }
 
+    /**
+     * Push a JSON-friendly layout-option map to the iframe. Consumed by
+     * {@code window.vgv_setLayoutOptions} in {@code vis-graph-viewer.js}.
+     *
+     * <p>The map shape mirrors the Cytoscape counterpart and is produced
+     * by {@link de.tk.dependencyanalyse.rapui.visgraph.ForceAtlasOptions}:
+     * top-level {@code physics} (with {@code forceAtlas2Based} block),
+     * {@code edgeLengths} ({@code edgeId → length}), {@code clusterCentroids}
+     * ({@code nodeId → {x, y}}), {@code prefilterMinLogWeight} and a
+     * {@code meta} block for the status display.</p>
+     */
+    public void setLayoutOptions(Map<String, Object> options) {
+        if (options == null) return;
+        exec("window.vgv_setLayoutOptions(" + gson.toJson(options) + ");");
+    }
+
     public void setPhysics(boolean enabled) {
         exec("window.vgv_setPhysics(" + enabled + ");");
     }

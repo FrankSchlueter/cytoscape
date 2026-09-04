@@ -56,6 +56,10 @@ public class GraphViewerControlBar extends Composite {
         void fitToScreen();
         default void loadGraphData(GraphData data) {}
         default String exportToGml() { return ""; }
+        default void setPhysics(boolean enabled) {}
+        default boolean isPhysicsEnabled() { return true; }
+        default void setAutoFitOnStabilization(boolean enabled) {}
+        default boolean isAutoFitOnStabilization() { return true; }
     }
 
     private static final class SwitchingOps implements ViewerOps {
@@ -67,6 +71,18 @@ public class GraphViewerControlBar extends Composite {
         @Override public String exportToGml() {
             GraphData data = v.getGraphData();
             return data == null ? "" : data.exportToGml();
+        }
+        @Override public void setPhysics(boolean enabled) {
+            v.setPhysics(enabled);
+        }
+        @Override public boolean isPhysicsEnabled() {
+            return v.isPhysicsEnabled();
+        }
+        @Override public void setAutoFitOnStabilization(boolean enabled) {
+            v.setAutoFitOnStabilization(enabled);
+        }
+        @Override public boolean isAutoFitOnStabilization() {
+            return v.isAutoFitOnStabilization();
         }
     }
 
@@ -145,14 +161,35 @@ public class GraphViewerControlBar extends Composite {
         /* ---- Physics (vis-only) ---- */
         physicsButton = new Button(this, SWT.CHECK);
         physicsButton.setText("Physics");
-        physicsButton.setSelection(true);
+        physicsButton.setSelection(viewer.isPhysicsEnabled());
         physicsButton.setEnabled(switching.getEngine() == GraphEngine.VIS_NETWORK);
+        physicsButton.addSelectionListener(new SelectionAdapter() {
+            @Override public void widgetSelected(SelectionEvent e) {
+                // Forward the check state to the active engine.
+                // vis-network honours {physics:{enabled:false}} as an
+                // immediate freeze: nodes stay at their current
+                // positions and the Barnes-Hut simulation stops.
+                // Cytoscape has no physics concept, so the button is
+                // disabled for that engine and this listener never
+                // fires there.
+                viewer.setPhysics(physicsButton.getSelection());
+            }
+        });
 
         /* ---- Auto-Fit (vis-only) ---- */
         autoFitButton = new Button(this, SWT.CHECK);
         autoFitButton.setText("Auto-Fit");
-        autoFitButton.setSelection(true);
+        autoFitButton.setSelection(viewer.isAutoFitOnStabilization());
         autoFitButton.setEnabled(switching.getEngine() == GraphEngine.VIS_NETWORK);
+        autoFitButton.addSelectionListener(new SelectionAdapter() {
+            @Override public void widgetSelected(SelectionEvent e) {
+                // Toggle "fit after stabilization". vis-network honours
+                // it on the next stabilize() call; Cytoscape's fcose
+                // layout always runs with fit:true and ignores this
+                // flag.
+                viewer.setAutoFitOnStabilization(autoFitButton.getSelection());
+            }
+        });
 
         /* ---- Fit-to-Screen button ---- */
         fitButton = new Button(this, SWT.PUSH);

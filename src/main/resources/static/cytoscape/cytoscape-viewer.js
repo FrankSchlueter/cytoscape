@@ -68,6 +68,31 @@
         }
     }
 
+    /**
+     * Announce viewer-ready to Java. Mirrors the
+     * {@code waitForViewerReadyWrapper} pattern in vis-graph-viewer.js:
+     * RAP's rap-client.js installs the BrowserFunction wrappers on
+     * the iframe's window in its {@code _onload} handler, which runs
+     * AFTER this IIFE but BEFORE the iframe's {@code load} event.
+     * Calling {@code javaCall('cgv_viewerReady')} synchronously from
+     * boot() races that install — the wrapper may not be on window
+     * yet, {@code javaCall} would warn "BrowserFunction not
+     * registered" and return silently, the Java side would never
+     * see viewerReady, and every queued setGraphData / setLayout
+     * call would sit in {@code pendingOps} forever. Polling for
+     * the wrapper closes that window.
+     */
+    var cgvReadySent = false;
+    function notifyViewerReady() {
+        if (cgvReadySent) return;
+        if (typeof window.cgv_viewerReady === 'function') {
+            cgvReadySent = true;
+            javaCall('cgv_viewerReady');
+        } else {
+            setTimeout(notifyViewerReady, 50);
+        }
+    }
+
     function $(id) {
         return document.getElementById(id);
     }
@@ -191,7 +216,7 @@
     function doBoot(container) {
         if (typeof cytoscape === 'undefined') {
             showError('Cytoscape library not loaded — check /cytoscape/cytoscape.min.js');
-            javaCall('cgv_viewerReady');
+            notifyViewerReady();
             booting = false;
             return;
         }
@@ -253,7 +278,7 @@
         } catch (e) {
             showError('Cytoscape init failed: ' + e.message);
             console.error(e);
-            javaCall('cgv_viewerReady');
+            notifyViewerReady();
             booting = false;
             return;
         }
@@ -306,14 +331,8 @@
             pendingElements = null;
         } else {
             // Still tell Java we're ready so setLayout / setData can flow.
-            javaCall('cgv_viewerReady');
+            notifyViewerReady();
         }
-
-        // Auto-load fallback: if Java doesn't push data within ~800ms,
-        // fetch the sample graph ourselves. This guarantees the demo
-        // renders quickly — the Java→JS RAP bridge typically completes
-        // within 200-400ms in practice, so this fallback rarely fires.
-        setTimeout(autoLoadFallback, 800);
     }
 
     function defaultStyle() {
@@ -586,6 +605,24 @@
      * <p>Cytoscape's LAST-matching-rule semantics guarantee this wins over
      * the {@code edge} rule from {@code defaultStyle()} as long as the
      * caller appends it AFTER the defaults.</p>
+     *
+     * <p><b>Why a real Function, not a string.</b> The width mapper is
+     * non-linear (sqrt, not LERP), so Cytoscape's native
+     * {@code mapData(field, minIn, maxIn, minOut, maxOut)} mapper is not
+     * a drop-in replacement — it would visibly thin edges with
+     * logWeight between 0.5 and 1 by ~30% (33.27% thinner at lw=0.5).
+     * The function mapper also lets us default missing data to 0
+     * (Cytoscape's docs do not state what mapData returns for undefined
+     * fields, and the cluster edge bundle must work on unweighted
+     * edges too).</p>
+     *
+     * <p>The value is a real {@code Function} object, not a stringified
+     * source. Cytoscape's {@code fromJson} does NOT evaluate
+     * function-shaped strings (the docs warn about this explicitly) —
+     * the function only works when it is a JS-level reference at the
+     * time {@code fromJson} walks the array. Since this style rule is
+     * built in JS (never round-tripped through JSON.parse), that is
+     * exactly what we do here.</p>
      */
     function clusterEdgeStyle() {
         return { selector: 'edge',
@@ -596,7 +633,11 @@
                 'line-color': '#A2B1C6',
                 'target-arrow-color': '#A2B1C6',
                 'opacity': 0.8,
-                'width': 'function(edge){var lw=edge.data("logWeight");lw=typeof lw==="number"&&lw>0?lw:0;return 0.6+0.9*Math.sqrt(Math.min(Math.max(lw,0),4));}'
+                'width': function (edge) {
+                    var lw = edge.data('logWeight');
+                    lw = (typeof lw === 'number' && lw > 0) ? lw : 0;
+                    return 0.6 + 0.9 * Math.sqrt(Math.min(Math.max(lw, 0), 4));
+                }
             }};
     }
 
@@ -982,10 +1023,10 @@
         } catch (e) {
             showError('applyElements failed: ' + e.message);
             console.error(e);
-            javaCall('cgv_viewerReady');
+            notifyViewerReady();
             return;
         }
-        javaCall('cgv_viewerReady');
+        notifyViewerReady();
         // Cytoscape's drawNode only paints background-image when the
         // underlying Image object reports complete=true (cytoscape.min.js,
         // Uu.drawNode → J()). If we draw before the SVG data URI finishes
@@ -1730,83 +1771,6 @@
             runLayout(currentLayout, pendingLayoutOptions);
         }
     };
-
-    /**
-     * Fallback: if Java hasn't pushed data after a short delay, fetch
-     * {@code /api/sample-graph} ourselves so the demo graph always renders
-     * (this also makes the viewer self-contained for testing without RAP).
-     */
-    function autoLoadFallback() {
-        if (window.__cgv_elements && window.__cgv_elements.length > 0) {
-            log('autoLoadFallback: data already present, skipping');
-            return;
-        }
-        log('autoLoadFallback: no data from Java yet, fetching /api/sample-graph');
-        debugStatus('auto-loading sample graph');
-        fetch('/api/sample-graph', { credentials: 'include' })
-            .then(function (r) {
-                if (!r.ok) throw new Error('HTTP ' + r.status);
-                return r.json();
-            })
-            .then(function (root) {
-                if (window.__cgv_elements && window.__cgv_elements.length > 0) {
-                    log('autoLoadFallback: data arrived from Java in the meantime, ignoring fallback');
-                    return;
-                }
-                log('autoLoadFallback: got ' + (root.elements ? root.elements.length : 0) + ' elements');
-                window.__cgv_elements = root.elements;
-                var opts = root.cytoscapeLayoutOptions || {};
-                if (typeof opts.idealEdgeLength === 'string') {
-                    try { opts.idealEdgeLength = new Function('return ' + opts.idealEdgeLength)(); }
-                    catch (e) { console.warn('failed to compile idealEdgeLength', e); }
-                }
-                pendingLayoutOptions = opts;
-                currentLayout = opts.name || 'fcose';
-                // Apply the Leiden community colors BEFORE pushing data so
-                // applyElements() can use them to pre-seed node positions
-                // in their community's grid cell.
-                if (root.leidenColors && cyReady && cy) {
-                    try {
-                        leidenColors = root.leidenColors;
-                        var styles = [];
-                        Object.keys(root.leidenColors).forEach(function (id) {
-                            styles.push({
-                                selector: 'node[id = "' + id + '"]',
-                                style: { 'background-color': root.leidenColors[id] }
-                            });
-                        });
-                        if (styles.length > 0) {
-                            // Re-include defaultStyle() so the
-                            // node:selected / edge:selected selectors
-                            // survive the stylesheet replacement.
-                            // Append imageNodeStyle() AFTER the Leiden
-                            // overrides so image-badges win back their
-                            // SVG rendering (Cytoscape applies the LAST
-                            // matching rule). clusterStyleRules() (when
-                            // active) sits BETWEEN styles and imageNode
-                            // so the compound-parent dashed border wins
-                            // over the Leiden per-node background-color.
-                            var defaults = defaultStyle();
-                            var merged = defaults
-                                .concat(styles)
-                                .concat(clusterStyleRules())
-                                .concat([imageNodeStyle()]);
-                            cy.style().fromJson(merged).update();
-                            // Rebuild texture cache so SVG badges paint
-                            // with the (possibly new) Leiden background
-                            // color after the stylesheet swap.
-                            preloadSvgImagesAndRedraw();
-                        }
-                        log('autoLoadFallback: applied ' + styles.length + ' Leiden colors');
-                    } catch (e) { console.warn('leiden color apply failed', e); }
-                }
-                window.cgv_setData();
-            })
-            .catch(function (e) {
-                log('autoLoadFallback failed: ' + e.message);
-                debugStatus('auto-load failed: ' + e.message);
-            });
-    }
 
     /**
      * Debug helper: append a status line to a small overlay so we can see
