@@ -39,6 +39,8 @@ public final class CytoscapeJsBridge {
     private static final String FN_REQ_NODE_CTX = "cgv_requestNodeContextMenu";
     private static final String FN_REQ_REL_CTX = "cgv_requestRelationshipContextMenu";
     private static final String FN_INVOKE_CTX = "cgv_invokeContextMenuAction";
+    private static final String FN_COMMUNITY_DRILL_DOWN = "cgv_notifyCommunityDrillDown";
+    private static final String FN_COMMUNITY_DRILL_OUT = "cgv_notifyCommunityDrillOut";
 
     private final Browser browser;
     private final Gson gson = new Gson();
@@ -51,6 +53,9 @@ public final class CytoscapeJsBridge {
     private final List<Runnable> clearedListeners = new CopyOnWriteArrayList<>();
     private final List<ContextHandler> contextHandlers = new CopyOnWriteArrayList<>();
     private final List<ContextActionHandler> contextActionHandlers = new CopyOnWriteArrayList<>();
+    private final List<java.util.function.Consumer<String>> communityDrillDownListeners =
+            new CopyOnWriteArrayList<>();
+    private final List<Runnable> communityDrillOutListeners = new CopyOnWriteArrayList<>();
 
     private volatile boolean viewerReady = false;
     private volatile GraphData currentData;
@@ -81,6 +86,14 @@ public final class CytoscapeJsBridge {
     public void addSelectionClearedListener(Runnable l) { clearedListeners.add(l); }
     public void addContextHandler(ContextHandler h) { contextHandlers.add(h); }
     public void addContextActionHandler(ContextActionHandler h) { contextActionHandlers.add(h); }
+    /**
+     * Register a listener that fires when the user double-clicks an
+     * aggregated community-node. The argument is the hex colour of the
+     * community the user wants to drill into.
+     */
+    public void addCommunityDrillDownListener(Consumer<String> l) { communityDrillDownListeners.add(l); }
+    /** Register a listener that fires when the user clicks the "Back to Communities" button. */
+    public void addCommunityDrillOutListener(Runnable l) { communityDrillOutListeners.add(l); }
 
     public void setCurrentData(GraphData data) { this.currentData = data; }
 
@@ -158,6 +171,41 @@ public final class CytoscapeJsBridge {
      */
     public void setLeidenColors(Map<String, String> colors) {
         exec("window.cgv_applyLeidenColors(" + gson.toJson(colors) + ");");
+    }
+
+    /**
+     * Push a community-aggregation view to the iframe. {@code mode} is
+     * either {@code "root"} (one node per Leiden community) or
+     * {@code "detail"} (drill-down into a single community). The
+     * elements array is the JSON payload produced by
+     * {@link de.tk.dependencyanalyse.rapui.visgraph.CommunityAggregator}.
+     */
+    public void applyCommunityView(String mode, List<Map<String, Object>> elements) {
+        applyCommunityView(mode, elements, false);
+    }
+
+    /**
+     * Same as {@link #applyCommunityView(String, List)} but with an
+     * explicit {@code dynamicSize} flag controlling whether the
+     * cytoscape-side community-node size scales logarithmically with
+     * the sum of incoming edge weights. Defaults to {@code false}
+     * (uniform fixed-size nodes) per the user-requested default.
+     */
+    public void applyCommunityView(String mode, List<Map<String, Object>> elements, boolean dynamicSize) {
+        String safeMode = (mode == null || mode.isEmpty()) ? "root" : mode;
+        exec("window.cgv_applyCommunityView(" + gson.toJson(safeMode) + ", "
+                + gson.toJson(elements == null ? List.of() : elements) + ", "
+                + gson.toJson(dynamicSize) + ");");
+    }
+
+    /**
+     * Clear the community-aggregation view and return the canvas to its
+     * normal (non-aggregated) state. The Java bridge must follow up by
+     * re-pushing the original graph via {@link #applyData(GraphData)} so
+     * the canvas actually has nodes/edges again.
+     */
+    public void clearCommunityView() {
+        exec("window.cgv_clearCommunityView();");
     }
 
     /**
@@ -366,6 +414,31 @@ public final class CytoscapeJsBridge {
             Object target = snap.target();
             for (ContextActionHandler h : contextActionHandlers) {
                 h.invoke(entry, target);
+            }
+            return null;
+        });
+        // Community drill-down: triggered by dblclick on a community-node
+        // in the aggregated root view. The argument is the community's
+        // hex colour (canonicalised by the JS side to lowercase).
+        functions.create(FN_COMMUNITY_DRILL_DOWN, args -> {
+            String color = BrowserFunctions.stringAt(args, 0);
+            if (color == null || color.isEmpty()) return null;
+            LOG.info("CytoscapeJsBridge: community drill-down requested for color=" + color);
+            for (Consumer<String> l : communityDrillDownListeners) {
+                try { l.accept(color); } catch (Exception e) {
+                    LOG.log(Level.WARNING, "communityDrillDownListener failed", e);
+                }
+            }
+            return null;
+        });
+        // Community drill-out: triggered by clicking the "Back to
+        // Communities" button in the detail view.
+        functions.create(FN_COMMUNITY_DRILL_OUT, args -> {
+            LOG.info("CytoscapeJsBridge: community drill-out requested");
+            for (Runnable l : communityDrillOutListeners) {
+                try { l.run(); } catch (Exception e) {
+                    LOG.log(Level.WARNING, "communityDrillOutListener failed", e);
+                }
             }
             return null;
         });

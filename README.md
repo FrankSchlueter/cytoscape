@@ -111,9 +111,52 @@ Am unteren Bildschirmrand:
    Click auf gleichen Legend-Eintrag, anderer Legend-Eintrag, oder
    Background-Tap).
 
-   vis-network hat keine Compound-Node-Semantik; dort werden die
-   Community-Farben gesetzt, aber kein Cluster-Layout ausgelöst. Der
-   Status-Text im Dialog weist darauf hin.
+vis-network hat keine Compound-Node-Semantik; dort werden die
+    Community-Farben gesetzt, aber kein Cluster-Layout ausgelöst. Der
+    Status-Text im Dialog weist darauf hin.
+
+    **Community Aggregation ("Show kumulated Communities")**: Direkt
+    unter dem Clustering-Abschnitt findet sich eine Checkbox, die die
+    Ansicht auf einen Kreis pro Leiden-Community reduziert.
+    Bidirektionale A→B und B→A-Kanten werden **nicht zusammengefasst**
+    — pro Richtung gibt es eine separate bezier-Kurve mit dem
+    aufsummierten Gewicht dieser Richtung. Die Farbe der Kante ist die
+    Farbe der Quell-Community, der Pfeilkopf in der Farbe der
+    Ziel-Community. Die Edge-Breite skaliert logarithmisch in
+    `weight` (`0.3 + 0.75 · log(weight+1)`, gecappt bei 6 px — halbiert
+    gegenüber dem ursprünglichen Layout). Eine zweite Checkbox
+    **"Dynamic Clusternode Size"** (Default: aus) steuert, ob die
+    Community-Node-Größe logarithmisch in `incomingWeightSum` (Summe
+    der Gewichte aller Inter-Edges, deren **Target** diese Community
+    ist) skaliert (Cap 140 px), oder ob alle Community-Knoten
+    einheitlich auf 110 px dargestellt werden — der User-Default ist
+    die feste Größe für ein gleichmäßiges Cluster-Layout. Der
+    Community-Knoten-Titel ist nur `Cluster N` (ohne Member-Count-Suffix);
+    der Member-Count bleibt im `memberCount`-Datenfeld verfügbar.
+    Beim Hovern zeigt jede Kante einen Cytoscape-Tooltip im Format
+    `"Cluster N → Cluster M: <sumWeight>"` (z.B. `Cluster 1 → Cluster 2: 15`).
+    Beim Hovern über einen Community-Knoten erscheint ein Tooltip mit
+    einer Liste aller Member-Knoten dieses Clusters. Die Communities
+    sind als gefüllte **Kreise** (`ellipse`) in der Palette-Farbe direkt
+    dargestellt (volle Deckkraft); die Pfeile landen am Rand des
+    Kreises (`padding=0`). Das Layout ist ein deterministisches
+    **Kreis-Layout** — die größte Community steht bei 12 Uhr, danach
+    im Uhrzeigersinn nach Member-Count absteigend; der Radius wächst
+    automatisch, damit k Communities à max 140 px nicht überlappen.
+    Klick auf einen Community-Knoten selektiert ihn und blendet
+    rechts eine Tabelle mit **einer Zeile pro Original-Edge** ein
+    (`From | Weight | To`); alle anderen Elemente werden gedimmt.
+    Klick auf eine Tabellenzeile feuert den
+    `RelationshipSelectionListener` mit der Original-Edge-ID. Zweiter
+    Klick auf denselben Knoten oder Klick in den leeren Hintergrund
+    deselektiert und entfernt die Tabelle. Doppelklick auf einen
+    Community-Knoten zoomt in die isolierte Detail-Ansicht dieser
+    Community — alle Member-Knoten plus die Intra-Community-Edges,
+    andere Communities werden komplett ausgeblendet. Ein
+    "← Back to Communities"-Button oben links im Viewer führt zur
+    aggregierten Root-Ansicht zurück. Nur
+    Cytoscape-Engine. Bei aktiviertem Auto-Apply wird die View nach
+    jedem "Apply Leiden Clustering" automatisch neu gerendert.
 
 4. **Legend (optional)** — Checkbox `Enable Legend` plus Combo `Source`
    (`Combined`, `Tag Values`, `Leiden Clusters`, `Node Types`). Das Panel

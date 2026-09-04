@@ -17,6 +17,7 @@ import org.eclipse.swt.widgets.Listener;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.Logger;
 
 /**
  * Composite that hosts a graph viewer (vis-network or Cytoscape.js) and
@@ -34,6 +35,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 public class SwitchingViewer extends Composite {
 
+    private static final Logger LOG = Logger.getLogger(SwitchingViewer.class.getName());
+
     private final Listener disposeListener = e -> disposeViewer();
 
     private GraphData currentData;
@@ -45,6 +48,8 @@ public class SwitchingViewer extends Composite {
 
     /** Last Leiden cluster colors pushed via {@link #setLeidenClusterColors}. */
     private Map<String, String> currentLeidenColors = Map.of();
+    /** True when the community-aggregation view is currently active on the active engine. Survives engine switches. */
+    private boolean communityViewActive = false;
     /** Legend state. {@code null} means no legend has ever been set. */
     private List<LegendEntry> currentLegend = List.of();
     private boolean legendEnabled = false;
@@ -56,6 +61,8 @@ public class SwitchingViewer extends Composite {
     private final java.util.List<RelationshipSelectionListener> relListeners = new CopyOnWriteArrayList<>();
     private final java.util.List<SelectionClearedListener> clearedListeners = new CopyOnWriteArrayList<>();
     private final java.util.List<EngineListener> engineListeners = new CopyOnWriteArrayList<>();
+    private final java.util.List<CytoscapeViewer.CommunityDrillListener> communityDrillListeners =
+            new CopyOnWriteArrayList<>();
 
     public SwitchingViewer(Composite parent, int style) {
         super(parent, style);
@@ -131,6 +138,13 @@ public class SwitchingViewer extends Composite {
                 visViewer.setLegend(currentLegend, true);
             }
         }
+        // Re-apply the community-aggregation view (Cytoscape only) so a
+        // vis -> cytoscape round-trip doesn't surprise the user with a
+        // blank canvas.
+        if (communityViewActive && engine == GraphEngine.CYTOSCAPE
+                && cytoscapeViewer != null && !currentLeidenColors.isEmpty()) {
+            cytoscapeViewer.setCommunityView(true, currentLeidenColors);
+        }
         // Second layout pass — gives the freshly-added Browser widget a
         // positive size now that the FillLayout knows its sibling count.
         // The viewer constructors themselves trigger a parent.layout()
@@ -205,6 +219,73 @@ public class SwitchingViewer extends Composite {
         } else if (visViewer != null) {
             visViewer.setLeidenClusterColors(currentLeidenColors);
         }
+    }
+
+    /* ---- community aggregation view (Cytoscape only) ---- */
+
+    /**
+     * Switch the canvas between the original per-node view and the
+     * aggregated community view (one Cytoscape node per Leiden community,
+     * one aggregated edge per inter-community pair).
+     *
+     * <p>Cytoscape only — vis-network has no compound-node semantics so
+     * the dialog disables this option when vis is active. {@link GraphConfigurationDialog}
+     * checks {@link #getEngine()} and surfaces a hint when the user tries
+     * to enable it under vis.</p>
+     *
+     * <p>The {@code colors} argument is optional — when {@code null}, the
+     * cached Leiden colors from the last {@link #setLeidenClusterColors}
+     * call are used. This lets the dialog re-apply the aggregation after
+     * a clustering re-run without re-passing the map every time.</p>
+     *
+     * <p>Backwards-compatible overload — defaults the dynamic-size flag
+     * to {@code false} (uniform fixed-size community-nodes).</p>
+     */
+    public void setCommunityView(boolean enabled, Map<String, String> colors) {
+        setCommunityView(enabled, colors, false);
+    }
+
+    /**
+     * Same as {@link #setCommunityView(boolean, Map)} but with an
+     * explicit flag controlling whether the cytoscape-side community-node
+     * size scales logarithmically with the sum of incoming edge weights
+     * ({@code dynamicSize=true}) or stays at the fixed default size
+     * ({@code dynamicSize=false}, the previous default after the user
+     * requested a toggle).
+     */
+    public void setCommunityView(boolean enabled, Map<String, String> colors, boolean dynamicSize) {
+        if (colors != null) this.currentLeidenColors = Map.copyOf(colors);
+        this.communityViewActive = enabled;
+        if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
+            if (enabled) {
+                cytoscapeViewer.setCommunityView(true, currentLeidenColors, dynamicSize);
+            } else {
+                cytoscapeViewer.setCommunityView(false, null, dynamicSize);
+            }
+            cytoscapeViewer.setCommunityViewActive(enabled);
+        } else {
+            LOG.warning("SwitchingViewer.setCommunityView: vis-network engine — community aggregation not supported");
+        }
+    }
+
+    /**
+     * Whether the community-aggregation view is currently active on the
+     * active engine. Returns {@code false} for vis-network (no-op there).
+     */
+    public boolean isCommunityViewActive() {
+        if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
+            return cytoscapeViewer.isCommunityViewActive();
+        }
+        return false;
+    }
+
+    /**
+     * Register a listener that fires when the user drills into a
+     * community (Cytoscape only — vis-network never produces these events).
+     */
+    public void addCommunityDrillListener(CytoscapeViewer.CommunityDrillListener l) {
+        communityDrillListeners.add(l);
+        if (cytoscapeViewer != null) cytoscapeViewer.addCommunityDrillListener(l);
     }
 
     /**
@@ -364,6 +445,9 @@ public class SwitchingViewer extends Composite {
         for (NodeSelectionListener l : nodeListeners) v.addNodeSelectionListener(l);
         for (RelationshipSelectionListener l : relListeners) v.addRelationshipSelectionListener(l);
         for (SelectionClearedListener l : clearedListeners) v.addSelectionClearedListener(l);
+        for (CytoscapeViewer.CommunityDrillListener l : communityDrillListeners) {
+            v.addCommunityDrillListener(l);
+        }
     }
 
     private void disposeViewer() {

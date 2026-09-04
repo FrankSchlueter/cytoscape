@@ -133,6 +133,15 @@ public class GraphConfigurationDialog extends Dialog {
     private Button isolateOrphansCheck;
     private Label leidenStatus;
 
+    // ---- community aggregation widgets ----
+    private Button showAggregatedCheck;
+    /** When true, community-node sizes in the aggregated overview scale
+     *  logarithmically with the sum of incoming edge weights; when false
+     *  (default) all community-nodes render at the same fixed size so
+     *  the user gets a clean, uniform layout. */
+    private Button dynamicClusterNodeSizeCheck;
+    private Label communityStatus;
+
     private Button closeButton;
 
     // ---- legend widgets ----
@@ -375,6 +384,9 @@ public class GraphConfigurationDialog extends Dialog {
 
         leidenStatus = new Label(shell, SWT.NONE);
         leidenStatus.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+
+        /* ---- Community Aggregation section ---- */
+        buildCommunityAggregationSection();
 
         /* ---- Legend (optional) section ---- */
         Label sectionLegend = new Label(shell, SWT.NONE);
@@ -971,6 +983,15 @@ public class GraphConfigurationDialog extends Dialog {
             rebuildLegendPreview();
             pushLegend();
         }
+
+        // Auto-apply community-aggregation: when the "Show kumulated
+        // Communities" checkbox is on, re-render the aggregated view
+        // automatically after each Leiden re-run. The user doesn't have
+        // to click "Apply" again to see the new community colors / sizes.
+        if (showAggregatedCheck != null && showAggregatedCheck.getSelection()) {
+            refreshCommunityAggregationStatus();
+            applyCommunityAggregationToggle();
+        }
     }
 
     /** Resolve the user-selected threshold from the combo, or the OFF sentinel. */
@@ -1218,5 +1239,137 @@ public class GraphConfigurationDialog extends Dialog {
                 legendHint.setText("Legend: " + legendPreview.size() + " Einträge an Viewer gepusht.");
             }
         }
+    }
+
+    /* ============================================================== */
+    /*  Community Aggregation ("Show kumulated Communities")          */
+    /* ============================================================== */
+
+    /**
+     * Build the Community Aggregation section of the dialog.
+     *
+     * <p>Layout:</p>
+     * <ul>
+     *   <li>Section label.</li>
+     *   <li>One checkbox "Show kumulated Communities".</li>
+     *   <li>A status label that shows "X Communities, Y inter-community
+     *       edges, Z intra-community edges" after Leiden clustering, or a
+     *       hint to run clustering first when no colors are available.</li>
+     *   <li>When vis-network is active the whole section is hidden
+     *       because vis has no compound-node semantics and aggregation
+     *       would only produce a degraded view.</li>
+     * </ul>
+     *
+     * <p>Toggling the checkbox calls
+     * {@link SwitchingViewer#setCommunityView(boolean, Map)} directly so
+     * the user sees immediate feedback. The same call is also triggered
+     * from {@link #applyLeidenClustering()} when the checkbox is on so
+     * a fresh clustering run re-renders the aggregated view
+     * automatically.</p>
+     */
+    private void buildCommunityAggregationSection() {
+        Label sectionCommunity = new Label(shell, SWT.NONE);
+        sectionCommunity.setText("Community Aggregation:");
+        sectionCommunity.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+
+        // Vis-network has no compound-node semantics — hide the section
+        // entirely and tell the user why. Engine-switch is not a hot
+        // path in the dialog so this is enough.
+        if (engine == GraphEngine.VIS_NETWORK) {
+            sectionCommunity.setText("Community Aggregation: (nicht verfügbar — vis-network unterstützt keine Compound-Knoten. Wechsle auf Cytoscape.)");
+            communityStatus = new Label(shell, SWT.NONE);
+            communityStatus.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+            return;
+        }
+
+        showAggregatedCheck = new Button(shell, SWT.CHECK);
+        showAggregatedCheck.setText("Show kumulated Communities");
+        showAggregatedCheck.setSelection(false);
+        showAggregatedCheck.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+        showAggregatedCheck.setToolTipText(
+                "Reduziert die Ansicht auf einen Knoten pro Leiden-Community plus "
+                + "eine aggregierte Kante pro inter-community Beziehungspaar. "
+                + "Doppelklick auf einen Community-Knoten zoomt in die isolierte "
+                + "Detail-Ansicht dieser Community; der 'Back to Communities'-Button "
+                + "führt zur aggregierten Root-Ansicht zurück.");
+        showAggregatedCheck.addSelectionListener(new SelectionAdapter() {
+            @Override public void widgetSelected(SelectionEvent e) {
+                applyCommunityAggregationToggle();
+            }
+        });
+
+        // Dynamic Clusternode Size: when ON, community-node sizes scale
+        // logarithmically with the sum of incoming edge weights. When OFF
+        // (default) every community-node renders at the same fixed size
+        // — the user explicitly asked for this default because the
+        // dynamic version made the cluster layout feel uneven.
+        dynamicClusterNodeSizeCheck = new Button(shell, SWT.CHECK);
+        dynamicClusterNodeSizeCheck.setText("Dynamic Clusternode Size");
+        dynamicClusterNodeSizeCheck.setSelection(false);
+        dynamicClusterNodeSizeCheck.setLayoutData(
+                new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+        dynamicClusterNodeSizeCheck.setToolTipText(
+                "Wenn aktiv, skaliert die Größe der Community-Knoten logarithmisch "
+                + "mit der Summe der Gewichte der eingehenden Inter-Community-Edges. "
+                + "Wenn aus (Standard), sind alle Community-Knoten gleich groß.");
+        dynamicClusterNodeSizeCheck.addSelectionListener(new SelectionAdapter() {
+            @Override public void widgetSelected(SelectionEvent e) {
+                applyCommunityAggregationToggle();
+            }
+        });
+
+        communityStatus = new Label(shell, SWT.NONE);
+        communityStatus.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+        refreshCommunityAggregationStatus();
+    }
+
+    /**
+     * Apply (or clear) the community-aggregation view according to the
+     * current checkbox state. Called from the checkbox selection
+     * listener and from {@link #applyLeidenClustering()} when the user
+     * re-runs clustering while the checkbox is on.
+     */
+    private void applyCommunityAggregationToggle() {
+        if (viewer == null || showAggregatedCheck == null || communityStatus == null) return;
+        boolean enabled = showAggregatedCheck.getSelection();
+        boolean dynamicSize = dynamicClusterNodeSizeCheck != null
+                && dynamicClusterNodeSizeCheck.getSelection();
+        if (!enabled) {
+            viewer.setCommunityView(false, null);
+            communityStatus.setText("Community Aggregation: deaktiviert (Canvas zeigt wieder alle Original-Knoten).");
+            return;
+        }
+        Map<String, String> colors = viewer.getLeidenClusterColors();
+        if (colors == null || colors.isEmpty()) {
+            showAggregatedCheck.setSelection(false);
+            communityStatus.setText("Community Aggregation: erst 'Apply Leiden Clustering' ausführen — danach ist die Option verfügbar.");
+            return;
+        }
+        viewer.setCommunityView(true, colors, dynamicSize);
+        refreshCommunityAggregationStatus();
+    }
+
+    /**
+     * Update the status label with the current aggregated-view
+     * statistics. Called after Leiden clustering, after every community
+     * toggle, and after the dialog opens so the user sees the latest
+     * numbers.
+     */
+    private void refreshCommunityAggregationStatus() {
+        if (communityStatus == null) return;
+        if (viewer == null) {
+            communityStatus.setText("");
+            return;
+        }
+        Map<String, String> colors = viewer.getLeidenClusterColors();
+        if (colors == null || colors.isEmpty()) {
+            communityStatus.setText("Community Aggregation: noch keine Leiden-Clusterfarben — 'Apply Leiden Clustering' ausführen.");
+            return;
+        }
+        long communityCount = CommunityAggregator.distinctCommunityColors(colors).size();
+        int interEdges = CommunityAggregator.countAggregatedEdges(data, colors);
+        communityStatus.setText("Community Aggregation: " + communityCount
+                + " Communities, " + interEdges + " inter-community edges. "
+                + "Doppelklick auf einen Community-Knoten für Details.");
     }
 }

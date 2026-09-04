@@ -152,6 +152,79 @@
             background: #fff3cd;
             cursor: pointer;
         }
+        /* ----- Community Overview edges table (shown when a community- */
+        /*       node is selected in the aggregated root view)             */
+        #cgv-community-edges {
+            position: relative;
+            background: rgba(255,255,255,0.96);
+            border: 1px solid #cccccc;
+            border-radius: 4px;
+            padding: 8px 10px;
+            font: 12px "Segoe UI", Arial, sans-serif;
+            min-width: 260px;
+            max-width: 440px;
+            max-height: 50vh;
+            overflow-x: auto;
+            box-shadow: 1px 2px 6px rgba(0,0,0,0.15);
+            display: none;
+            color: #222;
+        }
+        #cgv-community-edges .cgv-community-edges-header {
+            font-weight: 600;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #dddddd;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        #cgv-community-edges .cgv-community-edges-toggle {
+            cursor: pointer;
+            color: #888;
+            font-weight: normal;
+            padding: 0 4px;
+            user-select: none;
+        }
+        #cgv-community-edges .cgv-community-edges-toggle:hover {
+            color: #333;
+        }
+        #cgv-community-edges .cgv-community-edges-empty {
+            color: #999;
+            font-style: italic;
+            padding: 4px 0;
+        }
+        #cgv-community-edges table.cgv-community-edges-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        #cgv-community-edges table.cgv-community-edges-table th {
+            background: #f4f4f4;
+            text-align: left;
+            padding: 4px 6px;
+            border-bottom: 1px solid #cccccc;
+            font-weight: 600;
+        }
+        #cgv-community-edges table.cgv-community-edges-table td {
+            padding: 3px 6px;
+            border-bottom: 1px solid #eeeeee;
+            word-break: break-word;
+        }
+        #cgv-community-edges table.cgv-community-edges-table td.cgv-edge-weight {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
+        #cgv-community-edges table.cgv-community-edges-table tr.cgv-edge-incoming td {
+            background: rgba(255, 248, 220, 0.6);
+        }
+        #cgv-community-edges table.cgv-community-edges-table tr.cgv-edge-outgoing td {
+            background: rgba(255,255,255,0.6);
+        }
+        #cgv-community-edges table.cgv-community-edges-table tbody tr:hover td {
+            background: #fff3cd;
+            cursor: pointer;
+        }
         #cgv-legend .cgv-legend-header {
             font-weight: 600;
             padding-bottom: 4px;
@@ -221,6 +294,39 @@
             border-top: 1px solid #eee;
             margin-top: 4px;
         }
+        /* ----- Community Aggregation navigation (Back button + label) ----- */
+        #cgv-community-nav {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            display: none;
+            align-items: center;
+            gap: 8px;
+            z-index: 5000;
+            font: 12px "Segoe UI", Arial, sans-serif;
+        }
+        #cgv-community-nav button#cgv-community-back {
+            background: rgba(255,255,255,0.96);
+            border: 1px solid #4A90E2;
+            color: #4A90E2;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font: 600 12px "Segoe UI", Arial, sans-serif;
+            cursor: pointer;
+            box-shadow: 1px 2px 6px rgba(0,0,0,0.15);
+        }
+        #cgv-community-nav button#cgv-community-back:hover {
+            background: #4A90E2;
+            color: #ffffff;
+        }
+        #cgv-community-nav #cgv-community-label {
+            background: rgba(255,255,255,0.96);
+            border: 1px solid #cccccc;
+            border-radius: 4px;
+            padding: 4px 10px;
+            box-shadow: 1px 2px 6px rgba(0,0,0,0.15);
+            color: #222;
+        }
     </style>
     <!--
       cytoscape + layout-base + cose-base + fcose are concatenated into
@@ -240,6 +346,10 @@
 <div id="cy"></div>
 <div id="error"></div>
 <div id="cgv-context-menu"></div>
+<div id="cgv-community-nav">
+    <button id="cgv-community-back" type="button" title="Back to aggregated community view">&larr; Back to Communities</button>
+    <span id="cgv-community-label"></span>
+</div>
 <div id="cgv-side-panel">
     <div id="cgv-legend" aria-label="Color legend">
         <div class="cgv-legend-header">
@@ -256,6 +366,14 @@
         </div>
         <div class="cgv-edges-body"></div>
         <div class="cgv-edges-empty" style="display:none"></div>
+    </div>
+    <div id="cgv-community-edges" aria-label="Community node edges">
+        <div class="cgv-community-edges-header">
+            <span>Edges</span>
+            <span class="cgv-community-edges-toggle" title="Hide edges">&#x2212;</span>
+        </div>
+        <div class="cgv-community-edges-body"></div>
+        <div class="cgv-community-edges-empty" style="display:none"></div>
     </div>
 </div>
 

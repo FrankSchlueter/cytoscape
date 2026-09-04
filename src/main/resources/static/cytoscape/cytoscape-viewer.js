@@ -316,6 +316,7 @@
         } catch (e) { /* ignore — selector rule registration is best-effort */ }
 
         wireCytoscapeEvents(cy);
+        wireCommunityViewEvents();
         attachTooltips(cy);
         cyReady = true;
         // Boot succeeded — clear the booting flag so a subsequent engine
@@ -1801,6 +1802,14 @@
         // active) sits BETWEEN user-config and imageNode so the compound
         // parent rules win over any per-node background-color override.
         style = style.concat(clusterStyleRules());
+        // When the user is currently inside a community view, a
+        // NodeConfig update (e.g. tag-color change) must NOT strip the
+        // community-specific rules. Re-attach them so the community
+        // nodes / edges keep their distinctive styling until the user
+        // exits the view via "Back to Communities" or via dialog.
+        if (communityViewState && communityViewState !== 'normal') {
+            style = style.concat(communityStyleRules());
+        }
         style.push(imageNodeStyle());
         cy.style().fromJson(style).update();
         // Re-preload SVG badges — replacing the stylesheet rebuilds the
@@ -2015,11 +2024,24 @@
      * direction is obvious at a glance. The Java serializer stores the
      * header separately in `data.tooltipHeader`; if it's missing (e.g.
      * older data), we fall back to deriving it from the source/target.
+     *
+     * <p>Aggregated <b>community nodes</b> get a "Cluster members"
+     * tooltip listing every node that belongs to the community — the
+     * user explicitly asked for this so they can identify the cluster
+     * without double-clicking into it.</p>
      */
     function buildTooltipHtml(ele) {
         if (!ele || !ele.data) return null;
         var body = ele.data('tooltip');
-        if (!body) return null;
+        if (!body) body = '';
+        // Aggregated community-nodes: render a header + a list of member
+        // node names. data.memberIds comes from CommunityAggregator; the
+        // JS side resolves each id against the original-graph element
+        // set (or the intra-detail set) via cy.getElementById().name.
+        if (ele.isNode && ele.isNode() && body === '' &&
+                ele.data('isCommunity') === true) {
+            return buildCommunityNodeTooltip(ele);
+        }
         // Edges get a "<from> -> <to>" header using the connected
         // node labels. Prefer the explicit `name` property; fall back
         // to the node id (which is the same as the name in our CSV).
@@ -2028,14 +2050,45 @@
             if (!headerText) {
                 var s = ele.source();
                 var t = ele.target();
-                var sLabel = s.data('name') || s.id();
-                var tLabel = t.data('name') || t.id();
+                var sLabel = (s.data('name') || s.data('label') || s.id());
+                var tLabel = (t.data('name') || t.data('label') || t.id());
                 headerText = sLabel + ' -> ' + tLabel;
             }
             var header = '<div class="cgv-tt-header">' + escapeHtml(headerText) + '</div>';
             return header + '<div class="cgv-tt-body">' + body + '</div>';
         }
+        if (!body) return null;
         return body;
+    }
+
+    /**
+     * Build the "Cluster members" tooltip HTML for an aggregated
+     * community-node. Uses {@code data.memberIds} (the original
+     * {@link GraphNode} ids) and joins with the current canvas's
+     * {@code name} property. Falls back to the id when the member
+     * node is not currently present in the canvas (detail view).
+     */
+    function buildCommunityNodeTooltip(communityNode) {
+        var memberIds = communityNode.data('memberIds') || [];
+        var headerText = communityNode.data('label') || communityNode.id();
+        var header = '<div class="cgv-tt-header">' + escapeHtml(headerText) + '</div>';
+        var lines = [];
+        for (var i = 0; i < memberIds.length; i++) {
+            var mid = memberIds[i];
+            var m = cy.getElementById(mid);
+            var name = (m && m.length > 0)
+                    ? (m.data('name') || m.data('label') || mid) : mid;
+            lines.push('<div class="cgv-tt-member">' + escapeHtml(String(name)) + '</div>');
+        }
+        var body;
+        if (lines.length === 0) {
+            body = '<div class="cgv-tt-body"><em>(keine Member-Knoten)</em></div>';
+        } else {
+            body = '<div class="cgv-tt-body">' +
+                    '<div class="cgv-tt-section-title">Mitglieder (' +
+                    lines.length + '):</div>' + lines.join('') + '</div>';
+        }
+        return header + body;
     }
 
     function escapeHtml(s) {
@@ -2069,6 +2122,14 @@
         var body = tip.querySelector('.cgv-tt-body');
         if (body) {
             body.style.cssText = 'padding:6px 10px;';
+        }
+        var sectionTitle = tip.querySelector('.cgv-tt-section-title');
+        if (sectionTitle) {
+            sectionTitle.style.cssText = 'font-weight:600;margin:0 0 4px 0;color:#555;font-size:11px;text-transform:uppercase;letter-spacing:0.4px;';
+        }
+        var members = tip.querySelectorAll('.cgv-tt-member');
+        for (var mi = 0; mi < members.length; mi++) {
+            members[mi].style.cssText = 'padding:1px 0;font-size:12px;line-height:1.4;';
         }
         var container = document.getElementById('cy');
         var rect = container ? container.getBoundingClientRect() : { left: 0, top: 0 };
@@ -2117,8 +2178,14 @@
             // render their SVG even when Leiden set background-color.
             var merged = defaults
                 .concat(styles)
-                .concat(clusterStyleRules())
-                .concat([imageNodeStyle()]);
+                .concat(clusterStyleRules());
+            // Same reasoning as cgv_applyNodeConfig: when the user is
+            // inside the community view, re-attach the community rules
+            // so a Leiden re-run doesn't strip them out.
+            if (communityViewState && communityViewState !== 'normal') {
+                merged = merged.concat(communityStyleRules());
+            }
+            merged.push(imageNodeStyle());
             cy.style().fromJson(merged).update();
             // Rebuild the texture cache for SVG badges — see
             // preloadSvgImagesAndRedraw in applyElements for the rationale.
@@ -2236,6 +2303,742 @@
         var menu = $('cgv-context-menu');
         if (menu) menu.style.display = 'none';
     };
+
+    /* ============================================================== */
+    /*  Community Aggregation View ("Show kumulated Communities")      */
+    /* ============================================================== */
+
+    /**
+     * Module-level state for the optional community-aggregation view.
+     * Drives whether the canvas shows the original nodes, the
+     * aggregated root view (one node per community), or a drilled-down
+     * detail view (one community's original nodes only).
+     *
+     * <ul>
+     *   <li>{@code 'normal'} — default; shows the original graph.</li>
+     *   <li>{@code 'root'} — aggregated view; one node per community.</li>
+     *   <li>{@code 'detail:<hex>'} — drill-down into a single community.</li>
+     * </ul>
+     *
+     * <p>The state is queried by {@link applyCommunityView} so a second
+     * invocation can replace the previous payload without leaving
+     * stale elements on the canvas.</p>
+     */
+    var communityViewState = 'normal';
+
+    /**
+     * Set to the hex colour of the community currently being shown in
+     * detail view. {@code null} when the view is 'normal' or 'root'.
+     */
+    var communityViewDrillColor = null;
+
+    /**
+     * Whether the cytoscape-side {@code communityNodeStyle} should scale
+     * community-node sizes logarithmically with {@code incomingWeightSum}
+     * ({@code true}) or render every node at the same fixed size
+     * ({@code false}, the user-requested default). Threaded through
+     * {@code cgv_applyCommunityView} from the Java bridge.
+     */
+    var communityDynamicSize = false;
+
+    /**
+     * Cytoscape style rule for an aggregated community-node produced by
+     * {@link CommunityAggregator.buildRootElements} on the Java side.
+     *
+     * <p>Visual design (per the user spec):</p>
+     * <ul>
+     *   <li>Shape: <b>ellipse</b> (a true circle) — was round-rectangle.</li>
+     *   <li>Background: the Leiden palette colour at <b>full opacity</b>
+     *       (was 0.18) so the node visually matches its legend entry.</li>
+     *   <li>Border: same colour, solid 3 px (was dashed).</li>
+     *   <li>Padding: 0 — the arrow lands directly on the circle's
+     *       perimeter ("arrows arrive from inside the circle").</li>
+     *   <li>Label: white text for contrast against the saturated fill.</li>
+     *   <li>Size: depends on the {@code communityDynamicSize} flag
+     *       threaded from the Java dialog:
+     *       <ul>
+     *         <li>{@code communityDynamicSize === true} — logarithmic in
+     *             {@code incomingWeightSum} so heavy "load sink"
+     *             communities visibly grow (cap 140 px so adjacent
+     *             circle-neighbours on the layout never overlap).</li>
+     *         <li>{@code communityDynamicSize === false} (user default)
+     *             — every community-node renders at the same fixed
+     *             110 px diameter so the cluster layout reads uniformly.</li>
+     *       </ul></li>
+     * </ul>
+     */
+    function communityNodeStyle() {
+        var FIXED_SIZE = 110;
+        return { selector: 'node[?isCommunity]',
+            style: {
+                'shape': 'ellipse',
+                'background-color': 'data(communityColor)',
+                'background-opacity': 1.0,
+                'border-width': 3,
+                'border-color': 'data(communityColor)',
+                'border-style': 'solid',
+                'padding': '0px',
+                'label': 'data(label)',
+                'font-size': 13,
+                'color': '#ffffff',
+                'text-valign': 'center',
+                'text-halign': 'center',
+                'text-wrap': 'wrap',
+                'min-width': FIXED_SIZE,
+                'min-height': FIXED_SIZE,
+                // Dynamic vs fixed size controlled by the dialog's
+                // 'Dynamic Clusternode Size' checkbox (default false).
+                'width': function (n) {
+                    if (!communityDynamicSize) return FIXED_SIZE;
+                    var inSum = n.data('incomingWeightSum');
+                    inSum = (typeof inSum === 'number' && inSum > 0) ? inSum : 0;
+                    return Math.min(140, Math.max(70, 45 + Math.log(inSum + 1) * 12));
+                },
+                'height': function (n) {
+                    if (!communityDynamicSize) return FIXED_SIZE;
+                    var inSum = n.data('incomingWeightSum');
+                    inSum = (typeof inSum === 'number' && inSum > 0) ? inSum : 0;
+                    return Math.min(140, Math.max(70, 45 + Math.log(inSum + 1) * 12));
+                }
+            }};
+    }
+
+    /**
+     * Cytoscape style rule for an aggregated inter-community edge.
+     *
+     * <p>The Java-side {@code CommunityAggregator.buildRootElements}
+     * emits one edge PER DIRECTION (A->B and B->A are separate). The
+     * cytoscape bridge therefore:</p>
+     * <ul>
+     *   <li>colors the line + target arrow in the SOURCE community's
+     *       colour (data.sourceCommunityColor / data.targetCommunityColor) —
+     *       so a quick glance shows where traffic flows FROM;</li>
+     *   <li>scales the line WIDTH logarithmically with the raw weight,
+     *       <b>halved</b> from the previous formula
+     *       {@code 0.6 + 1.5 * log(w+1)} (cap 12 px) to
+     *       {@code 0.3 + 0.75 * log(w+1)} (cap 6 px) — keeps the
+     *       overall canvas light when many communities are stacked on
+     *       a circle;</li>
+     *   <li>renders a bezier curve with a generous
+     *       {@code control-point-step-size} so the A->B and the B->A
+     *       cable stay visibly apart and do not overlap;</li>
+     *   <li>shows a Cytoscape-native tooltip
+     *       "{@code Cluster N -> Cluster M: <sumWeight>}" on hover.</li>
+     * </ul>
+     */
+    function communityEdgeStyle() {
+        return { selector: 'edge[?isCommunityEdge]',
+            style: {
+                'curve-style': 'bezier',
+                // 80px separation is enough that two parallel bezier
+                // cables (A->B and B->A between the same pair of
+                // communities) read as distinct arcs even at high zoom.
+                'control-point-step-size': 80,
+                'target-arrow-shape': 'triangle',
+                'line-color': 'data(sourceCommunityColor)',
+                'target-arrow-color': 'data(targetCommunityColor)',
+                'opacity': 0.9,
+                // Logarithmic width in raw weight. Halved from the
+                // previous 0.6 + 1.5 * log(w+1) formula (cap 12) so the
+                // community overview doesn't drown in cable weight.
+                // Cap 6 px — even at w=10000 the cable stays readable
+                // without dominating adjacent node circles.
+                'width': function (edge) {
+                    var w = edge.data('weight');
+                    w = (typeof w === 'number' && w > 0) ? w : 0;
+                    return Math.min(6, Math.max(0.3, 0.3 + 0.75 * Math.log(w + 1)));
+                },
+                'label': function (e) {
+                    var cnt = e.data('edgeCount');
+                    return (typeof cnt === 'number' && cnt > 1) ? (cnt + 'x') : '';
+                },
+                'font-size': 11,
+                'color': '#333333',
+                'text-rotation': 'autorotate',
+                'text-background-color': '#ffffff',
+                'text-background-opacity': 0.7,
+                'text-background-padding': '2px',
+                // Cytoscape-native tooltip — "Cluster N -> Cluster M: <sum>".
+                // text-events:'yes' (the default for edges) lets the
+                // browser render the tooltip on hover.
+                'tooltip': function (e) { return e.data('tooltip') || ''; }
+            }};
+    }
+
+    /**
+     * Compose the community-view style rules into a single array so
+     * callers can splice them into a {@code cy.style().fromJson(...)}
+     * payload. Mirrors the {@link clusterStyleRules} pattern used by
+     * the regular cluster-layout path.
+     */
+    function communityStyleRules() {
+        return [communityNodeStyle(), communityEdgeStyle()];
+    }
+
+    /**
+     * Rebuild the Cytoscape stylesheet so the community-view rules
+     * (node[?isCommunity] / edge[?isCommunityEdge]) reach the renderer.
+     *
+     * <p>{@code mode} is currently unused but accepted so callers can
+     * later branch on root vs detail without changing the call site.</p>
+     */
+    function applyStyleForCommunityView(mode) {
+        if (!cyReady || !cy) return;
+        try {
+            var defaults = defaultStyle();
+            var rules = defaults
+                .concat(clusterStyleRules())
+                .concat(communityStyleRules());
+            rules.push(imageNodeStyle());
+            cy.style().fromJson(rules).update();
+        } catch (e) {
+            log('applyStyleForCommunityView failed: ' + e.message);
+        }
+    }
+
+    /**
+     * Rebuild the Cytoscape stylesheet WITHOUT the community rules.
+     * Used by {@code cgv_clearCommunityView} so the freshly-pushed
+     * original nodes render with their per-type colors instead of
+     * dangling community rules.
+     */
+    function applyStyleWithoutCommunity() {
+        if (!cyReady || !cy) return;
+        try {
+            var defaults = defaultStyle();
+            var rules = defaults.concat(clusterStyleRules());
+            rules.push(imageNodeStyle());
+            cy.style().fromJson(rules).update();
+        } catch (e) {
+            log('applyStyleWithoutCommunity failed: ' + e.message);
+        }
+    }
+
+    /**
+     * Pre-seed community-node positions on a CIRCLE for the root view.
+     * The largest community (highest {@code memberCount}) sits at 12
+     * o'clock; the remaining communities are placed clockwise in
+     * descending size. Deterministic — id-based tiebreak for equal-sized
+     * communities.
+     *
+     * <p>The radius is the MAX of three quantities: a hard floor, a
+     * viewport-relative default, and a "no-overlap" minimum that grows
+     * with the number of communities. The no-overlap minimum guarantees
+     * that adjacent circles on the ring always have at least
+     * {@code maxNodeSize} arc length between them — the
+     * {@link communityNodeStyle} size cap (140 px) is the binding
+     * constraint.</p>
+     *
+     * <p>After positioning, a no-op {@code cy.layout({name:'preset'})}
+     * confirms the manual positions and prevents Cytoscape from later
+     * recomputing them when the container resizes.</p>
+     */
+    function preseedCommunityCirclePositions() {
+        if (!cy) return;
+        var communityNodes = cy.nodes().filter(function (n) {
+            return n.data('isCommunity') === true;
+        });
+        if (communityNodes.length === 0) return;
+        var k = communityNodes.length;
+        // Frame sized so that the circle plus labels fits comfortably
+        // even at moderate zoom. 1600 × 900 keeps the aspect ratio close
+        // to the standard Cytoscape canvas.
+        var FRAME_W = 1600;
+        var FRAME_H = 900;
+        // Hard ceiling per community-node diameter. Mirrors the cap /
+        // fixed-size value in communityNodeStyle() — if the two drift
+        // apart, update both. When the user runs the community overview
+        // with the default (Dynamic Clusternode Size = OFF) we use 70 px
+        // (= 110 / 2 rounded down) instead of 140 px so the circle is
+        // half as large per the user's "50 % kleiner" request — the
+        // uniformly-sized nodes don't need the larger arc.
+        var maxNodeSize = communityDynamicSize ? 140 : 70;
+        // No-overlap minimum radius: arc length per community must be at
+        // least maxNodeSize, so 2π·r/k >= maxNodeSize  =>  r >= k·maxNodeSize/(2π).
+        // We add another maxNodeSize of slack so the circles sit comfortably
+        // inside the ring rather than kissing each other.
+        var noOverlapRadius = Math.ceil(k * maxNodeSize / (2 * Math.PI)) + maxNodeSize;
+        var maxRadius = Math.min(FRAME_W, FRAME_H) * 0.46;
+        var defaultRadius = Math.max(180, maxRadius * (1 + Math.min(k, 12) / 24));
+        var radius = Math.max(noOverlapRadius, Math.min(maxRadius, defaultRadius));
+
+        var nodes = [];
+        communityNodes.forEach(function (n) { nodes.push(n); });
+        nodes.sort(function (a, b) {
+            var ca = a.data('memberCount') || 0;
+            var cb = b.data('memberCount') || 0;
+            if (cb !== ca) return cb - ca;
+            return String(a.id()).localeCompare(String(b.id()));
+        });
+
+        // theta_0 = -PI/2  ->  12 o'clock
+        // step   =  2*PI/k -> clockwise (Cytoscape's y-axis points DOWN
+        //                     so sin(theta) already flips y accordingly)
+        for (var i = 0; i < k; i++) {
+            var angle = -Math.PI / 2 + 2 * Math.PI * i / k;
+            var n = nodes[i];
+            n.position({
+                x: Math.cos(angle) * radius,
+                y: Math.sin(angle) * radius
+            });
+        }
+        try {
+            cy.layout({ name: 'preset', animate: false, fit: false }).run();
+        } catch (e) { /* ignore */ }
+        log('preseedCommunityCirclePositions: ' + k
+                + ' communities on circle radius=' + Math.round(radius)
+                + ' (noOverlapMin=' + Math.round(noOverlapRadius) + ')');
+    }
+
+    /**
+     * Show or hide the community navigation overlay (Back button + label).
+     * Toggles the {@code #cgv-community-nav} element defined in
+     * cytoscape-viewer.html. The label text comes from the
+     * {@code data-community-label} attribute so the Java side can
+     * supply a localised description.
+     */
+    function setCommunityNavVisibility(visible, label) {
+        var nav = $('cgv-community-nav');
+        if (!nav) return;
+        nav.style.display = visible ? 'flex' : 'none';
+        var labelEl = $('cgv-community-label');
+        if (labelEl && label) labelEl.textContent = label;
+    }
+
+    /**
+     * Apply the community-aggregation view. Called by
+     * {@code cgv_applyCommunityView} from the Java bridge.
+     *
+     * <p>The function replaces the canvas elements with the supplied
+     * payload, runs the appropriate preset / grid layout, and toggles
+     * the back-navigation overlay. {@code mode === 'root'} shows one
+     * node per community; {@code mode === 'detail'} shows the original
+     * nodes of the community whose hex colour is encoded in each
+     * member-node's parent (or looked up via the per-element
+     * {@code _communityColor} field).</p>
+     */
+    function applyCommunityView(mode, elements) {
+        if (!cyReady || !cy) {
+            log('applyCommunityView: not ready, deferring (' + mode + ')');
+            pendingCommunityElements = { mode: mode, elements: elements };
+            return;
+        }
+        if (activeLegendColor) {
+            activeLegendColor = null;
+            renderLegendPanel();
+        }
+        try {
+            cy.batch(function () {
+                cy.elements().remove();
+                cy.add(elements || []);
+            });
+        } catch (e) {
+            showError('applyCommunityView failed: ' + e.message);
+            return;
+        }
+        communityViewState = mode;
+        // Push the community-aware stylesheet so node[?isCommunity] /
+        // edge[?isCommunityEdge] rules win over the generic node/edge
+        // defaults. Without this rebuild, community-nodes fall back to
+        // blue circles and community-edges to grey lines.
+        applyStyleForCommunityView(mode);
+        // Swap the tap-handler set: community-view handlers route
+        // selection to the #cgv-community-edges table + dim the rest
+        // of the canvas, the normal-view handlers fire the Java
+        // node/relationship listener callbacks.
+        setCommunitySelectionEnabled(true);
+        if (mode === 'root') {
+            communityViewDrillColor = null;
+            preseedCommunityCirclePositions();
+            try { cy.fit(undefined, 40); } catch (e) { /* ignore */ }
+            setCommunityNavVisibility(false, '');
+        } else if (mode === 'detail') {
+            // Try to extract the community colour from the first member's
+            // data — the Java side stamps every member with a
+            // _communityColor field so we can label the navigation bar.
+            var firstNode = cy.nodes()[0];
+            var drillColor = firstNode ? firstNode.data('_communityColor') : null;
+            communityViewDrillColor = drillColor || null;
+            // Run a quick fcose layout for the drilled view so the nodes
+            // spread out nicely without depending on the main
+            // clusterLayout options.
+            try {
+                cy.layout({
+                    name: 'fcose',
+                    quality: 'default',
+                    randomize: true,
+                    animate: false,
+                    fit: true,
+                    padding: 40,
+                    nodeRepulsion: 4500,
+                    idealEdgeLength: 80,
+                    edgeElasticity: 0.45,
+                    gravity: 0.25,
+                    numIter: 1500
+                }).run();
+            } catch (e) {
+                log('applyCommunityView detail: fcose layout failed: ' + e.message);
+            }
+            try { cy.fit(undefined, 40); } catch (e) { /* ignore */ }
+            var memberCount = cy.nodes().length;
+            var label = 'Detail view: ' + memberCount + ' member nodes';
+            if (drillColor) label += ' (color ' + drillColor + ')';
+            setCommunityNavVisibility(true, label);
+        } else {
+            communityViewDrillColor = null;
+            setCommunityNavVisibility(false, '');
+        }
+        notifyViewerReady();
+        log('applyCommunityView: mode=' + mode + ', '
+                + cy.nodes().length + ' nodes, ' + cy.edges().length + ' edges');
+    }
+
+    /**
+     * Pending community-view payload. When applyCommunityView arrives
+     * before the Cytoscape boot is complete, we stash it here so the
+     * {@code cgv_setData} re-entrancy guard can hand off to it once the
+     * viewer is ready.
+     */
+    var pendingCommunityElements = null;
+
+    /**
+     * Java-callable entry point for the community-aggregation view.
+     * {@code mode} is either {@code 'root'} or {@code 'detail'}; the
+     * payload is the JSON elements array produced by
+     * {@code CommunityAggregator.buildRootElements} /
+     * {@code buildCommunityDetailElements} on the Java side.
+     */
+    window.cgv_applyCommunityView = function (mode, elements, dynamicSize) {
+        log('cgv_applyCommunityView: mode=' + mode + ', elements='
+                + (elements ? elements.length : 0)
+                + ', dynamicSize=' + dynamicSize);
+        // Store the dynamic-size flag BEFORE applyCommunityView runs so
+        // the communityNodeStyle function mappers see the right value
+        // when the stylesheet is rebuilt.
+        communityDynamicSize = (dynamicSize === true);
+        applyCommunityView(mode, elements || []);
+    };
+
+    /**
+     * Java-callable entry point that returns the canvas to the original
+     * (non-aggregated) node view. The Java bridge is responsible for
+     * re-pushing the original {@code __cgv_elements} via the normal
+     * {@code cgv_setData} path AFTER this call returns, so we just clear
+     * the visible state here.
+     */
+    window.cgv_clearCommunityView = function () {
+        log('cgv_clearCommunityView');
+        communityViewState = 'normal';
+        communityViewDrillColor = null;
+        communityDynamicSize = false;
+        setCommunityNavVisibility(false, '');
+        hideCommunityEdgesTable();
+        // Restore the normal-view tap handlers BEFORE rebuilding the
+        // stylesheet so a subsequent background-tap (or any orphan tap)
+        // is handled by the generic path, not by stale community-view
+        // handlers that no longer match the elements on the canvas.
+        setCommunitySelectionEnabled(false);
+        // Rebuild the stylesheet WITHOUT community rules so the
+        // freshly-pushed original nodes (which the Java bridge loads
+        // via applyData right after this call) render with their
+        // per-type colors. Without this, the community-nodes / edges
+        // would have been replaced but the stylesheet would still
+        // contain community-specific selectors that no longer match.
+        applyStyleWithoutCommunity();
+    };
+
+    /**
+     * Wire the BACK-BUTTON DOM click handler. Called once from
+     * {@link boot} right after Cytoscape is up. The cytoscape-side
+     * dblclick-on-community-node + tap handlers are now installed by
+     * {@link wireCommunitySelectionEvents} (per community-view activation)
+     * so they can be torn down cleanly via
+     * {@link setCommunitySelectionEnabled}.
+     */
+    function wireCommunityViewEvents() {
+        var backBtn = $('cgv-community-back');
+        if (backBtn) {
+            backBtn.addEventListener('click', function () {
+                log('community back button clicked');
+                javaCall('cgv_notifyCommunityDrillOut');
+            });
+        }
+    }
+
+    /* ============================================================== */
+    /*  Community Selection (root view only)                          */
+    /* ============================================================== */
+
+    /**
+     * Selection handlers for the community-aggregation root view.
+     *
+     * <p>Wired via {@link setCommunitySelectionEnabled} which is called
+     * by {@link applyCommunityView} on entry and by
+     * {@link window.cgv_clearCommunityView} on exit. The handlers
+     * intentionally do NOT fire the regular
+     * {@code cgv_notifyNodeSelected} callback because the cytoscape
+     * community-node id (e.g. {@code community_0}) is a synthetic
+     * identifier with no matching Java {@code GraphNode} — the Java
+     * bridge would {@code findNode(...).ifPresent(...)} on a non-existent
+     * id and the listener would silently no-op.</p>
+     *
+     * <p>Instead, the table-row click is the single source of
+     * {@code cgv_notifyRelationshipSelected} events (see
+     * {@link onCommunityEdgeRowClick}), and the background-tap clears
+     * the selection without an explicit Java callback.</p>
+     */
+    function wireCommunitySelectionEvents() {
+        if (!cy) return;
+        // The dblclick-on-community-node handler fires the drill-down
+        // event to Java. Registered ONCE per community-view activation
+        // (and implicitly replaced via cy.removeAllListeners('dblclick')
+        // by setCommunitySelectionEnabled), so it cannot get out of
+        // sync with the active handler set.
+        cy.on('dblclick', 'node[?isCommunity]', function (evt) {
+            var node = evt.target;
+            if (!node) return;
+            var color = node.data('originalColor') || node.data('communityColor');
+            if (!color) return;
+            log('dblclick on community node: ' + node.id() + ', color=' + color);
+            javaCall('cgv_notifyCommunityDrillDown', color);
+        });
+        // Tap on a community-node: toggle selection + table.
+        cy.on('tap', 'node[?isCommunity]', function (evt) {
+            var node = evt.target;
+            if (!node) return;
+            if (node.selected()) {
+                node.unselect();
+                clearNeighborhoodHighlight(cy);
+                hideCommunityEdgesTable();
+            } else {
+                cy.elements().unselect();
+                node.select();
+                highlightCommunityNode(node);
+                renderCommunityEdgesTable(node);
+            }
+        });
+        // Tap on a community-edge: visual selection only — the aggregated
+        // edge has no Java GraphRelationship so we don't fire any
+        // java-side listener here (table rows do the routing).
+        cy.on('tap', 'edge[?isCommunityEdge]', function (evt) {
+            var edge = evt.target;
+            if (!edge) return;
+            if (edge.selected()) {
+                edge.unselect();
+                clearNeighborhoodHighlight(cy);
+                hideCommunityEdgesTable();
+            } else {
+                cy.elements().unselect();
+                edge.select();
+                highlightCommunityEdge(edge);
+                // Hide the table — it's only for node-selection. Re-show
+                // if the user clicks back on a node.
+                hideCommunityEdgesTable();
+            }
+        });
+        // Background tap clears the selection + table.
+        cy.on('tap', function (evt) {
+            if (evt.target === cy) {
+                var sel = cy.elements(':selected');
+                if (sel.length > 0) sel.unselect();
+                clearNeighborhoodHighlight(cy);
+                hideCommunityEdgesTable();
+            }
+        });
+        // Re-attach the tooltip system so mouseover/mouseout for the
+        // floating #cgv-tooltip survive the removeAllListeners('tap')
+        // call in setCommunitySelectionEnabled. attachTooltips itself is
+        // idempotent (it just registers fresh listeners each time).
+        attachTooltips(cy);
+        // Re-register the dblclick back-button DOM click as well — it's
+        // a static DOM event so it's unaffected, but keep the lifecycle
+        // explicit.
+        var backBtn = $('cgv-community-back');
+        if (backBtn && !backBtn.__cgvBackWired) {
+            backBtn.__cgvBackWired = true;
+            backBtn.addEventListener('click', function () {
+                log('community back button clicked');
+                javaCall('cgv_notifyCommunityDrillOut');
+            });
+        }
+    }
+
+    /**
+     * Apply / drop the community-specific tap handlers. We use the
+     * generic {@link wireCytoscapeEvents} for the normal graph view
+     * and {@link wireCommunitySelectionEvents} for the aggregated root
+     * view because the same {@code tap} event has different semantics
+     * in the two views (node id != java node id in the aggregated
+     * view).
+     *
+     * <p>Implementation note: we {@code removeAllListeners('tap')} so
+     * we never end up with both handler sets active at once (which
+     * would lead to duplicate highlight / table updates).</p>
+     */
+    function setCommunitySelectionEnabled(enabled) {
+        if (!cy) return;
+        try {
+            // Strip ALL tap + dblclick listeners so we never end up with
+            // BOTH the community-view and the generic-view handler sets
+            // active at once. attachTooltips registers its own listeners
+            // per-call, so we re-attach them inside wireCommunitySelectionEvents.
+            cy.removeAllListeners('tap');
+            cy.removeAllListeners('dblclick');
+        } catch (e) {
+            log('setCommunitySelectionEnabled: removeAllListeners failed: ' + e.message);
+        }
+        if (enabled) {
+            wireCommunitySelectionEvents();
+        } else {
+            // wireCytoscapeEvents expects a cy argument and registers the
+            // generic tap handlers used by the normal (non-aggregated)
+            // graph view. The function is defined at the IIFE root.
+            wireCytoscapeEvents(cy);
+        }
+    }
+
+    /**
+     * Re-use the normal-view neighborhood highlight: dim everything
+     * that isn't the selected community-node + its 1-hop neighbours.
+     * 1-hop in the aggregated root view = the selected community + all
+     * connected community-nodes (via inter-community edges) + those
+     * edges. Exactly the "alle eingehenden und ausgehenden Edges und
+     * die Node" the user asked for.
+     */
+    function highlightCommunityNode(node) {
+        clearNeighborhoodHighlight(cy);
+        if (!node.neighborhood) return;
+        var hood = node.neighborhood().add(node);
+        var others = cy.elements().difference(hood);
+        if (others.length > 0) others.addClass('cgv-faded');
+    }
+
+    /** Highlight a single community-edge + its two endpoint nodes. */
+    function highlightCommunityEdge(edge) {
+        clearNeighborhoodHighlight(cy);
+        var hood = edge.connectedNodes().union(edge);
+        var others = cy.elements().difference(hood);
+        if (others.length > 0) others.addClass('cgv-faded');
+    }
+
+    /**
+     * Build the "edges-of-selected-community" table for the root view.
+     * One row per ORIGINAL {@link GraphRelationship} id
+     * ({@code data.memberEdgeIds}) so a row-click can route to the
+     * real Java {@code RelationshipSelectionListener}.
+     *
+     * <p>Sort: incoming edges (target == selected community) first,
+     * then outgoing, both groups sorted by weight desc.</p>
+     */
+    function renderCommunityEdgesTable(node) {
+        var panel = document.getElementById('cgv-community-edges');
+        if (!panel) return;
+        var body = panel.querySelector('.cgv-community-edges-body');
+        var empty = panel.querySelector('.cgv-community-edges-empty');
+        if (!body || !empty) return;
+        body.innerHTML = '';
+        var rows = [];
+        node.connectedEdges().forEach(function (e) {
+            var s = e.source();
+            var t = e.target();
+            var memberIds = e.data('memberEdgeIds') || [];
+            var incoming = t.id() === node.id();
+            rows.push({
+                edgeId: e.id(),
+                memberEdgeIds: memberIds,
+                sourceLabel: incoming ? s.data('label') : t.data('label'),
+                targetLabel: incoming ? t.data('label') : s.data('label'),
+                weight: e.data('weight'),
+                incoming: incoming
+            });
+        });
+        rows.sort(function (a, b) {
+            if (a.incoming !== b.incoming) return a.incoming ? -1 : 1;
+            return (b.weight || 0) - (a.weight || 0);
+        });
+        if (rows.length === 0) {
+            empty.textContent = 'Keine Edges an dieser Community.';
+            empty.style.display = 'block';
+            panel.style.display = 'block';
+            return;
+        }
+        empty.style.display = 'none';
+        var table = document.createElement('table');
+        table.className = 'cgv-community-edges-table';
+        var thead = document.createElement('thead');
+        thead.innerHTML = '<tr><th>From</th><th>Weight</th><th>To</th></tr>';
+        table.appendChild(thead);
+        var tbody = document.createElement('tbody');
+        rows.forEach(function (r) {
+            // Expand the aggregated edge into one row per ORIGINAL
+            // GraphRelationship id so a row-click can route to the
+            // real Java listener. When the aggregated edge folded
+            // only one member we just emit that single row.
+            var edgeIds = r.memberEdgeIds.length > 0
+                    ? r.memberEdgeIds : [r.edgeId];
+            edgeIds.forEach(function (eid) {
+                var tr = document.createElement('tr');
+                tr.dataset.edgeId = eid;
+                tr.title = eid;
+                tr.className = r.incoming ? 'cgv-edge-incoming' : 'cgv-edge-outgoing';
+                var fromTd = document.createElement('td');
+                fromTd.className = 'cgv-edge-from';
+                fromTd.textContent = r.sourceLabel;
+                var weightTd = document.createElement('td');
+                weightTd.className = 'cgv-edge-weight';
+                weightTd.textContent = formatWeight(r.weight);
+                var toTd = document.createElement('td');
+                toTd.className = 'cgv-edge-to';
+                toTd.textContent = r.targetLabel;
+                tr.appendChild(fromTd);
+                tr.appendChild(weightTd);
+                tr.appendChild(toTd);
+                tr.addEventListener('click', function (evt) {
+                    onCommunityEdgeRowClick(eid, evt);
+                });
+                tbody.appendChild(tr);
+            });
+        });
+        table.appendChild(tbody);
+        body.appendChild(table);
+        panel.style.display = 'block';
+    }
+
+    /** Hide and clear the community-edges table. Idempotent. */
+    function hideCommunityEdgesTable() {
+        var panel = document.getElementById('cgv-community-edges');
+        if (!panel) return;
+        panel.style.display = 'none';
+        var body = panel.querySelector('.cgv-community-edges-body');
+        if (body) body.innerHTML = '';
+        var empty = panel.querySelector('.cgv-community-edges-empty');
+        if (empty) empty.style.display = 'none';
+    }
+
+    /**
+     * Row-Click-Handler. Fires
+     * {@code javaCall('cgv_notifyRelationshipSelected', edgeId)} so the
+     * Java-side {@code RelationshipSelectionListener} chain picks up
+     * the original relationship id; for aggregated inter-community
+     * ids (e.g. {@code inter_#abc_to_#def}) Java's
+     * {@link GraphData#findRelationship} returns {@code Optional.empty()}
+     * which is the correct behaviour — those ids are not real
+     * relationships.
+     */
+    function onCommunityEdgeRowClick(edgeId, evt) {
+        if (evt) evt.stopPropagation();
+        if (!cy) return;
+        javaCall('cgv_notifyRelationshipSelected', edgeId);
+        // Best-effort: also set the cytoscape selection if the edge id
+        // exists in the current canvas (true for the original-id rows
+        // in the detail view; a no-op for aggregated ids in the root
+        // view).
+        var edge = cy.getElementById(edgeId);
+        if (edge && edge.length > 0) {
+            cy.elements().unselect();
+            edge.select();
+        }
+    }
 
     /* ---- boot ---- */
 
