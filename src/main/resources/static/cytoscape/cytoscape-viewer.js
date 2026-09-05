@@ -1587,6 +1587,22 @@
     }
 
     /**
+     * Mirror of {@code CommunityAggregator.formatWeight} on the Java
+     * side. Used in the community-view edges table so the Weight column
+     * shows EXACTLY the same string as the on-canvas data.label and
+     * the tooltip's ": <weight>" suffix (server-side formatter —
+     * integer-valued weights drop the decimal point, fractional values
+     * keep one decimal place).
+     */
+    function formatAggregatedWeight(w) {
+        if (w == null) return '';
+        var n = typeof w === 'number' ? w : parseFloat(w);
+        if (isNaN(n) || !isFinite(n)) return String(w);
+        if (n === Math.floor(n)) return String(Math.round(n));
+        return n.toFixed(1);
+    }
+
+    /**
      * Build (or rebuild) the cluster-edges table for the currently
      * highlighted hex color. Populates the {@code #cgv-edges} panel with
      * one {@code <tr>} per edge touching at least one matched node:
@@ -2070,7 +2086,14 @@
      */
     function buildCommunityNodeTooltip(communityNode) {
         var memberIds = communityNode.data('memberIds') || [];
-        var headerText = communityNode.data('label') || communityNode.id();
+        // The on-canvas node label is the short form ("C1", "C2", ...).
+        // The tooltip header uses the long form ("Cluster 1", "Cluster 2",
+        // ...) per user spec — keep both spellings so the visual reads
+        // tight while the hover detail is verbose. We derive the long
+        // form from the cytoscape element id ("community_<idx>") so
+        // the same source of truth drives both label and header.
+        var longName = communityNode.id().replace(/^community_/, 'Cluster ');
+        var headerText = longName;
         var header = '<div class="cgv-tt-header">' + escapeHtml(headerText) + '</div>';
         var lines = [];
         for (var i = 0; i < memberIds.length; i++) {
@@ -2350,31 +2373,50 @@
      *   <li>Shape: <b>ellipse</b> (a true circle) — was round-rectangle.</li>
      *   <li>Background: the Leiden palette colour at <b>full opacity</b>
      *       (was 0.18) so the node visually matches its legend entry.</li>
-     *   <li>Border: same colour, solid 3 px (was dashed).</li>
+     *   <li>Border: same colour, solid 2 px (was 3 px + dashed).</li>
      *   <li>Padding: 0 — the arrow lands directly on the circle's
      *       perimeter ("arrows arrive from inside the circle").</li>
      *   <li>Label: white text for contrast against the saturated fill.</li>
-     *   <li>Size: depends on the {@code communityDynamicSize} flag
-     *       threaded from the Java dialog:
-     *       <ul>
-     *         <li>{@code communityDynamicSize === true} — logarithmic in
-     *             {@code incomingWeightSum} so heavy "load sink"
-     *             communities visibly grow (cap 140 px so adjacent
-     *             circle-neighbours on the layout never overlap).</li>
-     *         <li>{@code communityDynamicSize === false} (user default)
-     *             — every community-node renders at the same fixed
-     *             110 px diameter so the cluster layout reads uniformly.</li>
-     *       </ul></li>
+     *   <li>Size: per-element, read from {@code data._width} /
+     *       {@code data._height}. Those data fields are written by
+     *       {@link computeCommunityNodeSize} AFTER {@code cy.add()}
+     *       so we can use {@code data(...)} string-mapping here
+     *       (Cytoscape.js guarantees these survive {@code fromJson}
+     *       round-trips — function mappers do not).</li>
      * </ul>
      */
     function communityNodeStyle() {
-        var FIXED_SIZE = 110;
+        // Defensive size mappers (Phase 2 hardening): if data._width /
+        // data._height is missing or non-numeric (e.g. because the
+        // renderer hits a community-node before
+        // computeCommunityNodeSize has stamped it — or after a
+        // stylesheet rebuild via cgv_applyNodeConfig that did NOT
+        // re-invoke recomputeAllCommunityNodeSizes), fall back to a
+        // mode-appropriate default instead of letting Cytoscape
+        // resolve undefined to a large generic default (which has
+        // manifested as ~140 px circles when communityDynamicSize is
+        // off and the data field was missing). Function mappers
+        // already coexist happily with the 'data(_width)' form in
+        // this file (see communityEdgeStyle() below).
+        var fallbackW = 30;
+        var fallbackH = 30;
+        var fallbackDyn = 70;
+        var widthMapper = function (ele) {
+            var v = ele.data('_width');
+            return (typeof v === 'number' && v > 0) ? v
+                    : (communityDynamicSize ? fallbackDyn : fallbackW);
+        };
+        var heightMapper = function (ele) {
+            var v = ele.data('_height');
+            return (typeof v === 'number' && v > 0) ? v
+                    : (communityDynamicSize ? fallbackDyn : fallbackH);
+        };
         return { selector: 'node[?isCommunity]',
             style: {
                 'shape': 'ellipse',
                 'background-color': 'data(communityColor)',
                 'background-opacity': 1.0,
-                'border-width': 3,
+                'border-width': 2,
                 'border-color': 'data(communityColor)',
                 'border-style': 'solid',
                 'padding': '0px',
@@ -2384,22 +2426,16 @@
                 'text-valign': 'center',
                 'text-halign': 'center',
                 'text-wrap': 'wrap',
-                'min-width': FIXED_SIZE,
-                'min-height': FIXED_SIZE,
-                // Dynamic vs fixed size controlled by the dialog's
-                // 'Dynamic Clusternode Size' checkbox (default false).
-                'width': function (n) {
-                    if (!communityDynamicSize) return FIXED_SIZE;
-                    var inSum = n.data('incomingWeightSum');
-                    inSum = (typeof inSum === 'number' && inSum > 0) ? inSum : 0;
-                    return Math.min(140, Math.max(70, 45 + Math.log(inSum + 1) * 12));
-                },
-                'height': function (n) {
-                    if (!communityDynamicSize) return FIXED_SIZE;
-                    var inSum = n.data('incomingWeightSum');
-                    inSum = (typeof inSum === 'number' && inSum > 0) ? inSum : 0;
-                    return Math.min(140, Math.max(70, 45 + Math.log(inSum + 1) * 12));
-                }
+                'text-margin-y': 0,
+                'text-margin-x': 0,
+                // computeCommunityNodeSize stamps _width / _height on
+                // every community-node after cy.add(); the function
+                // mappers above are a defensive fallback for the case
+                // where the data field is missing.
+                'min-width': 14,
+                'min-height': 14,
+                'width': widthMapper,
+                'height': heightMapper
             }};
     }
 
@@ -2438,20 +2474,23 @@
                 'line-color': 'data(sourceCommunityColor)',
                 'target-arrow-color': 'data(targetCommunityColor)',
                 'opacity': 0.9,
-                // Logarithmic width in raw weight. Halved from the
-                // previous 0.6 + 1.5 * log(w+1) formula (cap 12) so the
-                // community overview doesn't drown in cable weight.
-                // Cap 6 px — even at w=10000 the cable stays readable
-                // without dominating adjacent node circles.
-                'width': function (edge) {
-                    var w = edge.data('weight');
-                    w = (typeof w === 'number' && w > 0) ? w : 0;
-                    return Math.min(6, Math.max(0.3, 0.3 + 0.75 * Math.log(w + 1)));
-                },
-                'label': function (e) {
-                    var cnt = e.data('edgeCount');
-                    return (typeof cnt === 'number' && cnt > 1) ? (cnt + 'x') : '';
-                },
+                // Fixed 2 px edge width across the whole community
+                // overview. The previous logarithmic scaling
+                // (0.3 + 0.75·log(w+1), cap 6) drowned the canvas in
+                // cable weight without adding information — the user
+                // reads weight via the on-canvas label (see below) and
+                // via the tooltip on hover. A flat 2 px also keeps the
+                // parallel bezier cables (A->B + B->A) from visually
+                // merging into a single thick stripe.
+                'width': 2,
+                // Label = the summed weight for that direction,
+                // formatted exactly like the tooltip's ": <weight>"
+                // suffix. Server-side stamps data.label via
+                // CommunityAggregator.formatWeight so the cytoscape
+                // string-mapper form 'data(label)' survives fromJson
+                // round-trips. Function mappers would be silently
+                // dropped, see communityNodeStyle() for the pattern.
+                'label': 'data(label)',
                 'font-size': 11,
                 'color': '#333333',
                 'text-rotation': 'autorotate',
@@ -2459,8 +2498,11 @@
                 'text-background-opacity': 0.7,
                 'text-background-padding': '2px',
                 // Cytoscape-native tooltip — "Cluster N -> Cluster M: <sum>".
-                // text-events:'yes' (the default for edges) lets the
-                // browser render the tooltip on hover.
+                // The ": <sum>" suffix is stamped server-side via the
+                // same CommunityAggregator.formatWeight formatter that
+                // produces the on-canvas data.label above — the user
+                // therefore sees the exact same string on the edge and
+                // in the tooltip.
                 'tooltip': function (e) { return e.data('tooltip') || ''; }
             }};
     }
@@ -2476,11 +2518,100 @@
     }
 
     /**
+     * Compute the per-community-node width / height in JS and write them
+     * to {@code data._width} / {@code data._height}. The community-view
+     * stylesheet reads these via the string-mappers
+     * {@code 'width': 'data(_width)'} and {@code 'height': 'data(_height)'}
+     * — Cytoscape.js guarantees that string mappers survive
+     * {@code fromJson} round-trips (unlike function mappers which are
+     * silently dropped).
+     *
+     * <p>Dynamic OFF (user default): every node gets a tiny compact
+     * diameter that fits the "C<N>" label. "C1" → 16 px wide × 14 px
+     * tall, "C12" → 24 px wide × 14 px tall. The circle is just big
+     * enough for the text, no oversized padding.</p>
+     *
+     * <p>Dynamic ON: logarithmic in {@code incomingWeightSum}, cap 140
+     * px (matches the cluster-layout maxNodeSize upper bound).</p>
+     *
+     * <p>Both branches write to {@code data._width} / {@code data._height}.
+     * The stylesheet reads them via {@code data(...)} string mappers
+     * which work across both the imperative and the fromJson paths.</p>
+     */
+    function computeCommunityNodeSize(communityNode) {
+        var label = (communityNode.data('label') || communityNode.id() || '').toString();
+        // Width in chars: "C1" is 2, "C12" is 3, etc. Approximate a
+        // ~7 px char width at font-size 11 with a 2 px border on each
+        // side. Add a tiny 14 px floor so the label never gets clipped.
+        var CHAR_PX = 7;
+        var BORDER_PX = 2;
+        var FLOOR_PX = 14;
+        var w, h;
+        if (communityDynamicSize) {
+            var inSum = communityNode.data('incomingWeightSum');
+            inSum = (typeof inSum === 'number' && inSum > 0) ? inSum : 0;
+            // Logarithmic scaling in incomingWeightSum, cap 140 px.
+            var dyn = Math.min(140, Math.max(70, 45 + Math.log(inSum + 1) * 12));
+            w = dyn;
+            h = dyn;
+        } else {
+            // Compact: width fits the label, height is the compact floor.
+            w = 30; // Math.max(FLOOR_PX, label.length * CHAR_PX + 2 * BORDER_PX);
+            h = 30; // FLOOR_PX;
+        }
+        // DIAGNOSE-LOG (Phase 1): helps the user see in the browser
+        // console whether this function actually fires for every
+        // community-node and which branch (dynamic vs compact) is taken.
+        log('computeCommunityNodeSize: id=' + communityNode.id()
+                + ', label="' + label + '" (len=' + label.length + ')'
+                + ', communityDynamicSize=' + communityDynamicSize
+                + ', inSum=' + inSum
+                + ' -> w=' + w + ', h=' + h);
+        communityNode.data('_width', w);
+        communityNode.data('_height', h);
+    }
+
+    /**
+     * Walk every community-node in the current canvas and stamp
+     * {@code _width} / {@code _height} on its data. Called from
+     * {@link applyCommunityView} after {@code cy.add()} and from
+     * {@link window.cgv_clearCommunityView} right before tearing the
+     * view down (so a stale data field can't survive a re-entry).
+     */
+    function recomputeAllCommunityNodeSizes() {
+        if (!cy) return;
+        // DIAGNOSE-LOG (Phase 1): tells us how many nodes are on the
+        // canvas and how many carry the isCommunity flag — if the
+        // latter is 0, computeCommunityNodeSize never fires and the
+        // communityNodeStyle mapper reads undefined for _width/_height.
+        var total = cy.nodes().length;
+        var communityCount = 0;
+        cy.nodes().forEach(function (n) {
+            if (n.data('isCommunity') === true) {
+                communityCount++;
+                computeCommunityNodeSize(n);
+            }
+        });
+        log('recomputeAllCommunityNodeSizes: total=' + total
+                + ', community=' + communityCount
+                + ', communityDynamicSize=' + communityDynamicSize);
+    }
+
+    /**
      * Rebuild the Cytoscape stylesheet so the community-view rules
      * (node[?isCommunity] / edge[?isCommunityEdge]) reach the renderer.
      *
      * <p>{@code mode} is currently unused but accepted so callers can
      * later branch on root vs detail without changing the call site.</p>
+     *
+     * <p>Per-element sizes are written to {@code data._width} /
+     * {@code data._height} by {@link recomputeAllCommunityNodeSizes}
+     * (called BEFORE this method in {@link applyCommunityView}).
+     * The stylesheet reads them via the string-mappers
+     * {@code 'width': 'data(_width)'} and {@code 'height': 'data(_height)'}
+     * which survive {@code fromJson} round-trips. So we can safely use
+     * the simpler {@code fromJson} path here — no need for the imperative
+     * API dance.</p>
      */
     function applyStyleForCommunityView(mode) {
         if (!cyReady || !cy) return;
@@ -2552,7 +2683,7 @@
         // (= 110 / 2 rounded down) instead of 140 px so the circle is
         // half as large per the user's "50 % kleiner" request — the
         // uniformly-sized nodes don't need the larger arc.
-        var maxNodeSize = communityDynamicSize ? 140 : 70;
+        var maxNodeSize = communityDynamicSize ? 140 : 24;
         // No-overlap minimum radius: arc length per community must be at
         // least maxNodeSize, so 2π·r/k >= maxNodeSize  =>  r >= k·maxNodeSize/(2π).
         // We add another maxNodeSize of slack so the circles sit comfortably
@@ -2637,6 +2768,12 @@
             return;
         }
         communityViewState = mode;
+        // Compute per-element _width / _height BEFORE rebuilding the
+        // stylesheet so the communityNodeStyle 'data(_width)' /
+        // 'data(_height)' mappers have values to read. Without this
+        // step the renderer would fall back to cytoscape.js's hard-coded
+        // node defaults (~40 px) regardless of our style overrides.
+        recomputeAllCommunityNodeSizes();
         // Push the community-aware stylesheet so node[?isCommunity] /
         // edge[?isCommunityEdge] rules win over the generic node/edge
         // defaults. Without this rebuild, community-nodes fall back to
@@ -2709,13 +2846,21 @@
      * {@code buildCommunityDetailElements} on the Java side.
      */
     window.cgv_applyCommunityView = function (mode, elements, dynamicSize) {
+        // DIAGNOSE-LOG (Phase 1): pin down whether the dynamicSize
+        // argument really arrives as a boolean from the Java bridge.
+        // If typeof is "object" (JSON round-trip dropped it) or
+        // "string" the strict === true check below would silently
+        // flip the flag to false and we'd be stuck on the compact
+        // path — or vice versa.
         log('cgv_applyCommunityView: mode=' + mode + ', elements='
                 + (elements ? elements.length : 0)
-                + ', dynamicSize=' + dynamicSize);
+                + ', dynamicSize=' + dynamicSize
+                + ' (typeof=' + (typeof dynamicSize) + ')');
         // Store the dynamic-size flag BEFORE applyCommunityView runs so
         // the communityNodeStyle function mappers see the right value
         // when the stylesheet is rebuilt.
         communityDynamicSize = (dynamicSize === true);
+        log('cgv_applyCommunityView: communityDynamicSize set to ' + communityDynamicSize);
         applyCommunityView(mode, elements || []);
     };
 
@@ -2923,12 +3068,23 @@
 
     /**
      * Build the "edges-of-selected-community" table for the root view.
-     * One row per ORIGINAL {@link GraphRelationship} id
-     * ({@code data.memberEdgeIds}) so a row-click can route to the
-     * real Java {@code RelationshipSelectionListener}.
+     * One row per AGGREGATED inter-community edge (the cytoscape edge
+     * id, e.g. {@code inter_#abc_to_#def}). The Weight column shows
+     * the SUM of all original {@link GraphRelationship} weights folded
+     * into that direction — formatted via {@link formatAggregatedWeight}
+     * so it matches the on-canvas data.label and the tooltip suffix
+     * exactly.
      *
-     * <p>Sort: incoming edges (target == selected community) first,
-     * then outgoing, both groups sorted by weight desc.</p>
+     * <p>Both incoming (target == selected community) and outgoing
+     * edges are rendered. Sort: incoming first, then outgoing, both
+     * groups sorted by weight desc.</p>
+     *
+     * <p>Row-click calls
+     * {@code javaCall('cgv_notifyRelationshipSelected', aggregatedEdgeId)}.
+     * The Java-side {@code GraphData.findRelationship} will return
+     * {@code Optional.empty()} for these aggregated ids because they
+     * are not real relationships — that's intentional, the row is
+     * purely informational.</p>
      */
     function renderCommunityEdgesTable(node) {
         var panel = document.getElementById('cgv-community-edges');
@@ -2941,11 +3097,9 @@
         node.connectedEdges().forEach(function (e) {
             var s = e.source();
             var t = e.target();
-            var memberIds = e.data('memberEdgeIds') || [];
             var incoming = t.id() === node.id();
             rows.push({
                 edgeId: e.id(),
-                memberEdgeIds: memberIds,
                 sourceLabel: incoming ? s.data('label') : t.data('label'),
                 targetLabel: incoming ? t.data('label') : s.data('label'),
                 weight: e.data('weight'),
@@ -2970,34 +3124,37 @@
         table.appendChild(thead);
         var tbody = document.createElement('tbody');
         rows.forEach(function (r) {
-            // Expand the aggregated edge into one row per ORIGINAL
-            // GraphRelationship id so a row-click can route to the
-            // real Java listener. When the aggregated edge folded
-            // only one member we just emit that single row.
-            var edgeIds = r.memberEdgeIds.length > 0
-                    ? r.memberEdgeIds : [r.edgeId];
-            edgeIds.forEach(function (eid) {
-                var tr = document.createElement('tr');
-                tr.dataset.edgeId = eid;
-                tr.title = eid;
-                tr.className = r.incoming ? 'cgv-edge-incoming' : 'cgv-edge-outgoing';
-                var fromTd = document.createElement('td');
-                fromTd.className = 'cgv-edge-from';
-                fromTd.textContent = r.sourceLabel;
-                var weightTd = document.createElement('td');
-                weightTd.className = 'cgv-edge-weight';
-                weightTd.textContent = formatWeight(r.weight);
-                var toTd = document.createElement('td');
-                toTd.className = 'cgv-edge-to';
-                toTd.textContent = r.targetLabel;
-                tr.appendChild(fromTd);
-                tr.appendChild(weightTd);
-                tr.appendChild(toTd);
-                tr.addEventListener('click', function (evt) {
-                    onCommunityEdgeRowClick(eid, evt);
-                });
-                tbody.appendChild(tr);
+            // ONE row per aggregated edge — do NOT expand into
+            // memberEdgeIds. The user sees a single line per
+            // Cluster-pair with the summed weight, regardless of how
+            // many original GraphRelationships the aggregation folded
+            // together. Row-click routes via the AGGREGATED edge id
+            // (Java finds no real relationship — that's expected).
+            var tr = document.createElement('tr');
+            tr.dataset.edgeId = r.edgeId;
+            tr.title = r.edgeId;
+            tr.className = r.incoming ? 'cgv-edge-incoming' : 'cgv-edge-outgoing';
+            var fromTd = document.createElement('td');
+            fromTd.className = 'cgv-edge-from';
+            fromTd.textContent = r.sourceLabel;
+            var weightTd = document.createElement('td');
+            weightTd.className = 'cgv-edge-weight';
+            // Java-format weight, identical to the on-canvas label
+            // and tooltip suffix. Server-side formatWeight is the
+            // single source of truth; this JS helper mirrors it so
+            // the table cell stays in sync if the formatter ever
+            // changes (and tests can pin both ends).
+            weightTd.textContent = formatAggregatedWeight(r.weight);
+            var toTd = document.createElement('td');
+            toTd.className = 'cgv-edge-to';
+            toTd.textContent = r.targetLabel;
+            tr.appendChild(fromTd);
+            tr.appendChild(weightTd);
+            tr.appendChild(toTd);
+            tr.addEventListener('click', function (evt) {
+                onCommunityEdgeRowClick(r.edgeId, evt);
             });
+            tbody.appendChild(tr);
         });
         table.appendChild(tbody);
         body.appendChild(table);

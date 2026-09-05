@@ -247,13 +247,15 @@ public final class CommunityAggregator {
             Map<String, Object> data1 = new LinkedHashMap<>();
             data1.put("id", communityNodeId(idx));
             data1.put(IS_COMMUNITY, true);
-            // Per user spec: the cluster-node label is just the
-            // cluster name ("Cluster N"). The member count is
-            // intentionally omitted — the user wants the visual to read
-            // as a pure cluster identifier, not a stat readout. The
-            // member count still lives in data.memberCount for callers
-            // that need it (legend, table builders, status text).
-            data1.put("label", "Cluster " + (idx + 1));
+            // Per user spec: the cluster-node label is the short form
+            // "C1", "C2", ... so the visual reads as a compact cluster
+            // identifier. The longer "Cluster N" wording is still used
+            // in the tooltip header (see buildCommunityNodeTooltip in
+            // cytoscape-viewer.js) and in the source/target labels of
+            // aggregated edges. The member count still lives in
+            // data.memberCount for callers that need it (legend, table
+            // builders, status text).
+            data1.put("label", "C" + (idx + 1));
             data1.put(FIELD_COMMUNITY_COLOR, color);
             data1.put(FIELD_MEMBER_COUNT, count);
             data1.put(FIELD_ORIGINAL_COLOR, color);
@@ -296,15 +298,25 @@ public final class CommunityAggregator {
             ed.put("weight", totalWeight);
             ed.put("logWeight", logWeight);
             ed.put(FIELD_EDGE_COUNT, b.edgeCount);
-            // Cytoscape label (drawn on canvas): only show "Nx" when the
-            // direction folded more than one individual edge.
-            ed.put("label", b.edgeCount > 1 ? b.edgeCount + " Edges" : "");
+            // Cytoscape on-canvas label = the summed weight for this
+            // direction. Server-side formatter (Java) so the cytoscape
+            // string-mapper 'label': 'data(label)' in
+            // communityEdgeStyle() reads it directly via fromJson
+            // round-trip. The value matches the tooltip's ": <weight>"
+            // suffix below — single source of truth, no JS-side
+            // re-formatting needed (mirrored by
+            // cytoscape-viewer.js formatAggregatedWeight for the table
+            // cell so a future Java-side change shows up in both
+            // places).
+            ed.put("label", formatWeight(totalWeight));
             // Cytoscape-native tooltip ("From -> To: sumWeight" format).
             ed.put(FIELD_TOOLTIP,
                     sourceLabel + " \u2192 " + targetLabel + ": " + formatWeight(totalWeight));
-            // Expose the original edge IDs so a row-click on the
-            // community-node selection table can route back to the real
-            // Java relationship via cgv_notifyRelationshipSelected.
+            // Expose the original edge IDs for reference (table rows
+            // currently route via the AGGREGATED edge id above; the
+            // memberEdgeIds are kept on the data payload in case a
+            // future "drill into the relationship" affordance wants
+            // them).
             ed.put(FIELD_MEMBER_EDGE_IDS, new ArrayList<>(b.memberEdgeIds));
             Map<String, Object> elem = new LinkedHashMap<>();
             elem.put("data", ed);

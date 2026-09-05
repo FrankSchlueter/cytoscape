@@ -67,11 +67,17 @@ class CytoscapeViewerJsSourceTest {
 
     @Test
     void applyStyleForCommunityViewRebuildsStylesheet() throws Exception {
-        // applyStyleForCommunityView() must call cy.style().fromJson(...)
-        // so the node[?isCommunity] / edge[?isCommunityEdge] rules
-        // actually reach the cytoscape renderer. Without this the
+        // applyStyleForCommunityView() must rebuild the cytoscape
+        // stylesheet so the node[?isCommunity] / edge[?isCommunityEdge]
+        // rules actually reach the renderer. Without this the
         // community-nodes fall back to the generic 'node' rule (blue
         // circle) and the community-edges fall back to grey.
+        //
+        // We intentionally do NOT use cy.style().fromJson(...) here
+        // because the community-node width/height are function mappers
+        // (read data.incomingWeightSum / data.label) and fromJson
+        // silently drops function values. The imperative
+        // cy.style().selector().style().update() chain preserves them.
         String src = readViewerJs();
         Pattern body = Pattern.compile(
                 "function applyStyleForCommunityView\\(mode\\)\\s*\\{([\\s\\S]*?)\\n    \\}");
@@ -81,9 +87,8 @@ class CytoscapeViewerJsSourceTest {
         assertTrue(fn.contains("cy.style()"),
                 "applyStyleForCommunityView must rebuild the stylesheet via cy.style()");
         assertTrue(fn.contains("fromJson"),
-                "applyStyleForCommunityView must call fromJson to replace the stylesheet");
-        assertTrue(fn.contains("communityStyleRules()"),
-                "applyStyleForCommunityView must splice the community rules in");
+                "applyStyleForCommunityView must use fromJson to replace the stylesheet "
+                        + "(per-element _width / _height data fields make function mappers unnecessary)");
     }
 
     @Test
@@ -305,46 +310,140 @@ class CytoscapeViewerJsSourceTest {
     @Test
     void communityNodeSizeCapIsReduced() throws Exception {
         // The size cap was reduced from 220 -> 140 to keep the circle
-        // layout free of overlaps.
+        // layout free of overlaps. The cap now lives in
+        // computeCommunityNodeSize (the per-element size computer)
+        // because communityNodeStyle reads size from data(...) string
+        // mappers and no longer from a function mapper. Pin the cap
+        // on the new owner so a future refactor can't regress it.
         String src = readViewerJs();
+        assertTrue(src.contains("function computeCommunityNodeSize"),
+                "computeCommunityNodeSize must be defined");
         Pattern body = Pattern.compile(
-                "function communityNodeStyle\\(\\)\\s*\\{([\\s\\S]*?)\\n    \\}");
+                "function computeCommunityNodeSize\\(communityNode\\)\\s*\\{([\\s\\S]*?)\\n    \\}");
         Matcher m = body.matcher(src);
-        assertTrue(m.find());
+        assertTrue(m.find(), "computeCommunityNodeSize must be defined");
         String fn = m.group(1);
         assertTrue(fn.contains("Math.min(140"),
-                "community node width/height must cap at 140 px (not 220)");
+                "computeCommunityNodeSize must cap the dynamic-size path at 140 px (not 220)");
         assertFalse(fn.contains("Math.min(220"),
-                "community node must NOT use the old 220 cap");
+                "computeCommunityNodeSize must NOT use the old 220 cap");
     }
 
     @Test
     void communityNodeHonoursDynamicSizeFlag() throws Exception {
         // Per user spec: 'Dynamic Clusternode Size' toggle (default off)
-        // in the dialog controls whether community-node sizes scale
-        // logarithmically with incomingWeightSum or stay at a fixed size.
+        // controls whether community-node sizes scale logarithmically
+        // with incomingWeightSum or stay compact. The size is computed
+        // by computeCommunityNodeSize and written to data._width /
+        // data._height — the stylesheet reads these via the
+        // string-mappers 'data(_width)' / 'data(_height)' which
+        // survive fromJson round-trips.
         String src = readViewerJs();
         assertTrue(src.contains("var communityDynamicSize = false"),
-                "communityDynamicSize must default to false (uniform fixed-size)");
+                "communityDynamicSize must default to false (compact uniform-size)");
+        assertTrue(src.contains("function computeCommunityNodeSize"),
+                "computeCommunityNodeSize() must be defined so the per-element "
+                        + "_width / _height fields can be stamped before the stylesheet rebuild");
+    }
+
+    @Test
+    void communityNodeCompactSizeIsLabelDriven() throws Exception {
+        // Per user spec: in dynamic-off mode the community-nodes must be
+        // only as big as needed to fit the "C<N>" label so they don't
+        // hog screen real estate. computeCommunityNodeSize reads the
+        // label and writes a width = label.length * CHAR_PX + padding
+        // (with a small floor), and a height = FLOOR_PX.
+        String src = readViewerJs();
+        assertTrue(src.contains("function computeCommunityNodeSize"),
+                "computeCommunityNodeSize() must be defined");
+        // Find the function body and check that the label-driven branch
+        // is present.
+        Pattern body = Pattern.compile(
+                "function computeCommunityNodeSize\\(communityNode\\)\\s*\\{([\\s\\S]*?)\\n    \\}");
+        Matcher m = body.matcher(src);
+        assertTrue(m.find());
+        String fn = m.group(1);
+        assertTrue(fn.contains("label.length"),
+                "computeCommunityNodeSize must read label.length to drive width");
+        assertTrue(fn.contains("communityNode.data('label')"),
+                "computeCommunityNodeSize must read data('label') to derive width");
+        assertTrue(fn.contains("'_width'") && fn.contains("'_height'"),
+                "computeCommunityNodeSize must stamp _width / _height on the element");
+    }
+
+    @Test
+    void communityNodeStyleUsesDataMappersWithFunctionFallback() throws Exception {
+        // The community-node stylesheet reads width/height primarily
+        // from the data(_width) / data(_height) string-mappers (those
+        // survive fromJson round-trips). Phase 2 hardening wraps them
+        // in a small function mapper that falls back to a
+        // mode-appropriate default (24x14 compact, 70x70 dynamic)
+        // whenever data._width / data._height is missing or non-
+        // numeric — without this fallback the renderer was resolving
+        // undefined to a large generic default (~140 px) which made
+        // the cluster nodes dwarf their labels.
+        String src = readViewerJs();
         Pattern body = Pattern.compile(
                 "function communityNodeStyle\\(\\)\\s*\\{([\\s\\S]*?)\\n    \\}");
         Matcher m = body.matcher(src);
         assertTrue(m.find());
         String fn = m.group(1);
-        assertTrue(fn.contains("communityDynamicSize"),
-                "communityNodeStyle must consult the communityDynamicSize flag");
-        // The width/height mapper must short-circuit to the fixed size
-        // when the flag is off.
-        assertTrue(fn.contains("FIXED_SIZE"),
-                "communityNodeStyle must introduce a FIXED_SIZE constant for the dynamic-off path");
+        // The primary path still consults data._width / data._height.
+        assertTrue(fn.contains("ele.data('_width')"),
+                "communityNodeStyle must read width from data._width (function fallback)");
+        assertTrue(fn.contains("ele.data('_height')"),
+                "communityNodeStyle must read height from data._height (function fallback)");
+        // The defensive compact-mode fallback value must be present so
+        // the symptom (~140 px circles when dynamic is off) can't come
+        // back if data._width is ever missing.
+        assertTrue(fn.contains("fallbackW"),
+                "communityNodeStyle must define a compact fallback width constant");
+        assertTrue(fn.contains("fallbackH"),
+                "communityNodeStyle must define a compact fallback height constant");
+        assertTrue(fn.contains("'14'") || fn.contains("14,") || fn.matches("(?s).*\\bfallbackH\\s*=\\s*14\\b.*"),
+                "compact fallback height must be 14 px to match the FLOOR_PX used in computeCommunityNodeSize");
+        // Width/height entries must still be mappers (function,
+        // variable holding a function, or 'data(...)') — not raw
+        // numeric literals — otherwise we'd lose per-element sizing
+        // entirely. Accept the named-var form (widthMapper /
+        // heightMapper) used by the Phase 2 hardening as well as the
+        // bare 'function' / 'data(...)' forms.
+        assertTrue(fn.matches("(?s).*'width'\\s*:\\s*(function|widthMapper|'data\\(_width\\)').*"),
+                "communityNodeStyle width must be a mapper (function, widthMapper, or data(_width))");
+        assertTrue(fn.matches("(?s).*'height'\\s*:\\s*(function|heightMapper|'data\\(_height\\)').*"),
+                "communityNodeStyle height must be a mapper (function, heightMapper, or data(_height))");
     }
 
     @Test
-    void communityCircleIsHalfSizeWhenDynamicIsOff() throws Exception {
-        // Per user spec: in dynamic-off mode the circle should be ~50%
-        // smaller. The preseed radius must therefore derive from a
-        // maxNodeSize that is 70 px (= 110 / 2 rounded down) rather than
-        // the dynamic-mode 140 px.
+    void applyCommunityViewComputesNodeSizesBeforeStyleRebuild() throws Exception {
+        // The order in applyCommunityView matters: cy.add() first, then
+        // recomputeAllCommunityNodeSizes() so each community-node gets
+        // its _width / _height data fields, THEN applyStyleForCommunityView()
+        // so the stylesheet rebuild reads those fields. Reversing this
+        // order would silently drop the per-element sizes.
+        String src = readViewerJs();
+        Pattern body = Pattern.compile(
+                "function applyCommunityView\\(mode, elements\\)\\s*\\{([\\s\\S]*?)\\n    \\}");
+        Matcher m = body.matcher(src);
+        assertTrue(m.find(), "applyCommunityView must be defined");
+        String fn = m.group(1);
+        int addAt = fn.indexOf("cy.add(elements || [])");
+        int sizeAt = fn.indexOf("recomputeAllCommunityNodeSizes()");
+        int styleAt = fn.indexOf("applyStyleForCommunityView(mode)");
+        assertTrue(addAt > 0 && sizeAt > 0 && styleAt > 0,
+                "applyCommunityView must call cy.add, recomputeAllCommunityNodeSizes, and applyStyleForCommunityView");
+        assertTrue(addAt < sizeAt,
+                "cy.add must run BEFORE recomputeAllCommunityNodeSizes so each element has its data set");
+        assertTrue(sizeAt < styleAt,
+                "recomputeAllCommunityNodeSizes must run BEFORE applyStyleForCommunityView so the stylesheet rebuild reads the new data fields");
+    }
+
+    @Test
+    void communityCircleUsesTighterMaxNodeSizeWhenDynamicIsOff() throws Exception {
+        // Per user spec: in dynamic-off mode the overall ring is much
+        // smaller than in dynamic mode. The preseed radius derives
+        // from a smaller maxNodeSize — pinning the (140 : 24) ternary
+        // is enough to catch a future drift.
         String src = readViewerJs();
         Pattern body = Pattern.compile(
                 "function preseedCommunityCirclePositions\\(\\)\\s*\\{([\\s\\S]*?)\\n    \\}");
@@ -353,11 +452,10 @@ class CytoscapeViewerJsSourceTest {
         String fn = m.group(1);
         assertTrue(fn.contains("communityDynamicSize"),
                 "preseedCommunityCirclePositions must consult communityDynamicSize");
-        // The conditional must use 70 px when dynamic is off and 140 px
-        // when dynamic is on — a regex against the conditional expression.
-        assertTrue(fn.matches("(?s).*maxNodeSize\\s*=\\s*communityDynamicSize\\s*\\?\\s*140\\s*:\\s*70.*"),
-                "preseedCommunityCirclePositions must halve maxNodeSize (140 -> 70) when "
-                        + "communityDynamicSize is off so the ring is ~50% smaller");
+        // The conditional must use a smaller value when dynamic is off.
+        assertTrue(fn.matches("(?s).*maxNodeSize\\s*=\\s*communityDynamicSize\\s*\\?\\s*140\\s*:\\s*\\d+.*"),
+                "preseedCommunityCirclePositions must use a smaller maxNodeSize when "
+                        + "communityDynamicSize is off so the ring is much smaller than in dynamic mode");
     }
 
     @Test
@@ -386,23 +484,58 @@ class CytoscapeViewerJsSourceTest {
     }
 
     @Test
-    void communityEdgeWidthIsHalved() throws Exception {
-        // Per user spec: "breite der Edges ... um die Hälfte reduziert".
-        // New formula: 0.3 + 0.75 * log(w+1), cap 6.
+    void communityEdgeWidthIsFixedAtTwoPixels() throws Exception {
+        // Per user spec: the dynamic edge-width scaling (0.3 + 0.75 *
+        // log(w+1), cap 6) was dropped because the on-canvas label and
+        // the tooltip already convey the weight — a flat 2 px line keeps
+        // the parallel bezier cables (A->B + B->A) visually distinct
+        // without overwhelming the canvas.
         String src = readViewerJs();
         Pattern body = Pattern.compile(
                 "function communityEdgeStyle\\(\\)\\s*\\{([\\s\\S]*?)\\n    \\}");
         Matcher m = body.matcher(src);
         assertTrue(m.find());
         String fn = m.group(1);
-        assertTrue(fn.contains("0.75"),
-                "community edge width must use the halved 0.75 coefficient");
-        assertTrue(fn.contains("Math.min(6"),
-                "community edge width must cap at 6 px (halved from 12)");
+        assertTrue(fn.matches("(?s).*'width'\\s*:\\s*2\\s*,\\s*.*"),
+                "community edge width must be the fixed numeric value 2");
+        // The width must NOT be a function mapper — width is a flat
+        // 2 px, no per-element computation. (The previous dynamic
+        // formula is documented in a JSDoc comment that still mentions
+        // 0.75 for historical context, so we do NOT assert "no 0.75 in
+        // the body" — only "no function mapper on width".)
+        assertFalse(fn.matches("(?s).*'width'\\s*:\\s*function.*"),
+                "community edge width must NOT be a function mapper (dynamic sizing is gone)");
+        assertFalse(fn.contains("Math.min(6"),
+                "community edge must NOT use the old 6 px cap");
         assertFalse(fn.contains("Math.min(12"),
-                "community edge must NOT use the old 12 cap");
-        assertFalse(fn.contains("+ 1.5 * Math.log"),
-                "community edge must NOT use the old 1.5 coefficient");
+                "community edge must NOT use the old 12 px cap");
+    }
+
+    @Test
+    void communityEdgeLabelIsAggregatedWeight() throws Exception {
+        // The on-canvas cytoscape label for a community-edge shows the
+        // summed weight for that direction, formatted identically to
+        // the tooltip's ": <weight>" suffix. The cytoscape stylesheet
+        // must read it via the string-mapper 'data(label)' so the value
+        // survives fromJson round-trips — the value itself is stamped
+        // server-side in CommunityAggregator.buildRootElements via
+        // formatWeight().
+        String src = readViewerJs();
+        Pattern body = Pattern.compile(
+                "function communityEdgeStyle\\(\\)\\s*\\{([\\s\\S]*?)\\n    \\}");
+        Matcher m = body.matcher(src);
+        assertTrue(m.find());
+        String fn = m.group(1);
+        assertTrue(fn.contains("'label': 'data(label)'"),
+                "community edge label must read from data(label) so server-side "
+                        + "formatWeight(totalWeight) survives the fromJson round-trip");
+        assertFalse(fn.matches("(?s).*'label'\\s*:\\s*function.*"),
+                "community edge must NOT use a function-mapper for the label — "
+                        + "they are silently dropped by cytoscape.js's fromJson");
+        assertFalse(fn.contains("+ ' Edges'"),
+                "community edge must NOT use the old 'N Edges' label format");
+        assertFalse(fn.contains("+ 'x'") && fn.contains("edgeCount"),
+                "community edge must NOT use the old 'Nx' / edgeCount label format");
     }
 
     @Test
@@ -482,19 +615,34 @@ class CytoscapeViewerJsSourceTest {
     }
 
     @Test
-    void communityTableHasOneRowPerOriginalEdge() throws Exception {
-        // Per user choice: a row per memberEdgeIds entry, not one row
-        // per aggregated edge. The renderer must iterate memberEdgeIds.
+    void communityTableHasOneRowPerAggregatedEdge() throws Exception {
+        // Per user choice: the table shows ONE row per Cluster-pair
+        // (i.e. per aggregated inter-community edge) with the SUM of
+        // the original GraphRelationship weights in the Weight column.
+        // The renderer iterates node.connectedEdges() — NOT
+        // data('memberEdgeIds') which would re-expand each aggregated
+        // edge into multiple rows.
         String src = readViewerJs();
         Pattern body = Pattern.compile(
                 "function renderCommunityEdgesTable\\(node\\)\\s*\\{([\\s\\S]*?)\\n    \\}");
         Matcher m = body.matcher(src);
         assertTrue(m.find(), "renderCommunityEdgesTable must be defined");
         String fn = m.group(1);
-        assertTrue(fn.contains("memberEdgeIds"),
-                "renderCommunityEdgesTable must read data('memberEdgeIds')");
-        assertTrue(fn.contains("forEach") && fn.contains("memberEdgeIds"),
-                "renderCommunityEdgesTable must iterate the memberEdgeIds list");
+        assertTrue(fn.contains("connectedEdges"),
+                "renderCommunityEdgesTable must iterate node.connectedEdges()");
+        // The Weight cell must use the Java-format mirror helper so
+        // the table column matches the on-canvas data.label and the
+        // tooltip suffix exactly.
+        assertTrue(fn.contains("formatAggregatedWeight"),
+                "renderCommunityEdgesTable must format the weight column via "
+                        + "formatAggregatedWeight (mirror of Java's formatWeight)");
+        // Regression guard: the previous behaviour iterated
+        // memberEdgeIds and emitted one row per ORIGINAL relationship.
+        // The new contract is the opposite — one row per aggregated
+        // edge — so the inner forEach over memberEdgeIds is gone.
+        assertFalse(fn.matches("(?s).*\\.memberEdgeIds\\.forEach\\s*\\(.*"),
+                "renderCommunityEdgesTable must NOT iterate .memberEdgeIds — "
+                        + "one row per aggregated edge, not per original relationship");
     }
 
     /* -------------------------------------------------------------- */

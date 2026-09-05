@@ -168,6 +168,69 @@ class CommunityAggregatorTest {
     }
 
     @Test
+    void rootElementsEdgeLabelIsAggregatedWeightFormattedLikeTooltip() {
+        // Per user spec: the on-canvas cytoscape label for a community
+        // edge must show the SUM of original weights for that direction,
+        // formatted EXACTLY like the tooltip's ": <weight>" suffix. Java
+        // is the single source of truth — cytoscape-viewer.js mirrors
+        // the format via formatAggregatedWeight so the community-edges
+        // table column stays in sync. Integer-valued weights render
+        // without a decimal point, fractional values keep one decimal
+        // place (see CommunityAggregator.formatWeight).
+        List<Map<String, Object>> out = CommunityAggregator.buildRootElements(
+                twoCommunityGraph(), twoCommunityColors());
+        List<Map<?, ?>> edges = out.stream()
+                .map(e -> (Map<?, ?>) e.get("data"))
+                .filter(d -> Boolean.TRUE.equals(d.get(CommunityAggregator.IS_COMMUNITY_EDGE)))
+                .collect(java.util.stream.Collectors.toList());
+        Map<?, ?> abEdge = findDirectionalEdge(edges, "#4a90e2", "#e74c3c");
+        Map<?, ?> baEdge = findDirectionalEdge(edges, "#e74c3c", "#4a90e2");
+        // A->B direction sums to 8.0 (integer-valued) -> label "8".
+        assertEquals("8", abEdge.get("label"),
+                "edge label must equal formatWeight(8.0) = \"8\"");
+        // B->A direction sums to 7.0 -> label "7".
+        assertEquals("7", baEdge.get("label"),
+                "edge label must equal formatWeight(7.0) = \"7\"");
+        // The on-canvas label and the tooltip suffix must agree: pull
+        // the tooltip's ": <weight>" tail and compare.
+        String abTooltip = (String) abEdge.get(CommunityAggregator.FIELD_TOOLTIP);
+        String baTooltip = (String) baEdge.get(CommunityAggregator.FIELD_TOOLTIP);
+        assertTrue(abTooltip.endsWith(": 8"),
+                "tooltip suffix must equal formatWeight(8.0) = \"8\", got: " + abTooltip);
+        assertTrue(baTooltip.endsWith(": 7"),
+                "tooltip suffix must equal formatWeight(7.0) = \"7\", got: " + baTooltip);
+    }
+
+    @Test
+    void rootElementsEdgeLabelUsesFractionalFormatForFractionalWeight() {
+        // Fractional weight must keep one decimal place (e.g. "7.5"),
+        // matching formatWeight() so the cytoscape label and the
+        // tooltip's ": <weight>" suffix stay byte-identical.
+        GraphNode a = node("a");
+        GraphNode c = node("c");
+        GraphData g = new GraphData(List.of(a, c), List.of(
+                rel("e1", a, c, Map.of("weight", 7.5))
+        ));
+        Map<String, String> colors = new LinkedHashMap<>();
+        colors.put("a", "#4A90E2");
+        colors.put("c", "#E74C3C");
+        List<Map<String, Object>> out = CommunityAggregator.buildRootElements(g, colors);
+        // buildRootElements emits community-nodes BEFORE edges, so
+        // we must filter to find the single inter-community edge
+        // (a->c via #4A90E2 -> #E74C3C).
+        Map<?, ?> edge = out.stream()
+                .map(e -> (Map<?, ?>) e.get("data"))
+                .filter(d -> Boolean.TRUE.equals(d.get(CommunityAggregator.IS_COMMUNITY_EDGE)))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(
+                        "expected exactly one inter-community edge, got: " + out));
+        assertEquals("7.5", edge.get("label"),
+                "fractional weight 7.5 must format as \"7.5\" (no integer rounding)");
+        assertTrue(((String) edge.get(CommunityAggregator.FIELD_TOOLTIP)).endsWith(": 7.5"),
+                "tooltip must end with the same \": 7.5\" suffix as the label");
+    }
+
+    @Test
     void communityNodeCarriesMemberIdsInColorOrder() {
         // The aggregated community-node must list its member-node ids
         // so the cytoscape bridge can render a "Cluster members" tooltip
@@ -224,12 +287,14 @@ class CommunityAggregatorTest {
         Map<?, ?> smallCommunity = findCommunity(out, "#E74C3C");
         String bigLabel = (String) bigCommunity.get("label");
         String smallLabel = (String) smallCommunity.get("label");
-        // Big community (3 nodes) should be labelled "Cluster 1" — index 0
-        // after sorting by member count descending.
-        assertTrue(bigLabel.contains("Cluster 1"),
-                "larger community should be labelled Cluster 1, got: " + bigLabel);
-        assertTrue(smallLabel.contains("Cluster 2"),
-                "smaller community should be labelled Cluster 2, got: " + smallLabel);
+        // Big community (3 nodes) should be labelled "C1" — index 0
+        // after sorting by member count descending. Per the latest user
+        // spec, the on-canvas label uses the short "C<N>" form; the
+        // long "Cluster <N>" form stays in the tooltip header only.
+        assertTrue(bigLabel.contains("C1"),
+                "larger community should be labelled C1, got: " + bigLabel);
+        assertTrue(smallLabel.contains("C2"),
+                "smaller community should be labelled C2, got: " + smallLabel);
         assertEquals(3, ((Number) bigCommunity.get(
                 CommunityAggregator.FIELD_MEMBER_COUNT)).intValue());
         assertEquals(1, ((Number) smallCommunity.get(
@@ -237,11 +302,14 @@ class CommunityAggregatorTest {
     }
 
     @Test
-    void communityNodeLabelIsJustClusterName() {
-        // Per user spec: the cluster-node label is just "Cluster N", no
-        // member count suffix. The member count stays available via the
-        // FIELD_MEMBER_COUNT field for callers that need it (status text,
-        // legend, table builders).
+    void communityNodeLabelIsShortFormCN() {
+        // Per user spec: the cluster-node label is the short form "C1",
+        // "C2", ... so the visual reads as a compact cluster identifier.
+        // The longer "Cluster N" wording is still used in the tooltip
+        // header (see buildCommunityNodeTooltip in cytoscape-viewer.js)
+        // and in the source/target labels of aggregated edges. The
+        // member count stays available via the FIELD_MEMBER_COUNT field
+        // for callers that need it (legend, table builders, status text).
         GraphNode a = node("a");
         GraphNode b = node("b");
         GraphNode c = node("c");
@@ -252,8 +320,8 @@ class CommunityAggregatorTest {
         colors.put("c", "#aaa");
         List<Map<String, Object>> out = CommunityAggregator.buildRootElements(g, colors);
         Map<?, ?> community = findCommunity(out, "#aaa");
-        assertEquals("Cluster 1", community.get("label"),
-                "label must be just 'Cluster 1' — no member count suffix");
+        assertEquals("C1", community.get("label"),
+                "label must be the short form 'C1' — no member count suffix, no 'Cluster' prefix");
     }
 
     @Test
