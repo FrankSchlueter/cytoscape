@@ -213,6 +213,217 @@ class CytoscapeViewerEndToEndTest {
     }
 
     /**
+     * COSE layout options contract (added for the Einstufungsverlauf.gml
+     * fix): when {@code cgv_setLayout('COSE')} is called with no options,
+     * the JS bridge must fill in the cose-specific defaults that
+     * guarantee the graph does not overlap when Cytoscape inflates the
+     * collision boxes to label dimensions. Without these defaults COSE
+     * collapses the graph into a tight blob on long-label samples like
+     * Einstufungsverlauf.gml.
+     *
+     * <p>The expected magnitudes mirror SampleGraphController.coseOpts
+     * and the cose-branch in cytoscape-viewer.js runLayout(). Drift
+     * between this test and those sources means the contract has been
+     * broken — bump the test on intentional changes.</p>
+     */
+    @Test
+    void coseLayoutDefaultsReachLayoutEngine() throws Exception {
+        evalViewerScript();
+        GraphData data = sampleGraph();
+        List<Map<String, Object>> elements = data.toCytoscapeElements(null);
+        jsContext.eval("js", buildAtomicScript(elements));
+        // cgv_setLayout without options triggers the cose-branch in
+        // runLayout() with NO server-supplied options — the JS-side
+        // defaults must fill the gap so the layout is still usable.
+        jsContext.eval("js", "window.cgv_setLayout('COSE');");
+
+        Object opts = readLastLayoutOptions();
+        assertNotNull(opts, "cy.layout(opts) must be called with an options object — "
+                + "the cose-branch must supply its defaults even when the server "
+                + "omits coseLayoutOptions");
+        Map<String, Object> map = asStringKeyedMap(opts);
+        assertEquals("cose", map.get("name"),
+                "the layout engine name must be the cytoscape-bundle cose, "
+                        + "not fcose — they have different option semantics");
+        // Magnitudes that prevent overlap on label-scaled boxes.
+        assertEquals(true, map.get("randomize"),
+                "CoSE's spectral pre-pass needs randomize=true; fcose's "
+                        + "randomize=false would lock COSE into a Leiden grid it "
+                        + "cannot use");
+        assertEquals(150000.0, ((Number) map.get("nodeRepulsion")).doubleValue(), 0.0,
+                "nodeRepulsion must be large enough to separate label-scaled "
+                        + "boxes (~120 px for German labels in Einstufungsverlauf.gml)");
+        assertEquals(30.0, ((Number) map.get("nodeOverlap")).doubleValue(), 0.0,
+                "nodeOverlap must be ≥30 so post-convergence pairs never share a pixel");
+        assertEquals(150.0, ((Number) map.get("idealEdgeLength")).doubleValue(), 0.0,
+                "idealEdgeLength must exceed the inflated box diagonal so the "
+                        + "spring force is in equilibrium rather than fighting itself");
+        assertEquals(100.0, ((Number) map.get("edgeElasticity")).doubleValue(), 0.0,
+                "CoSE default edgeElasticity (100) — stiff spring to enforce "
+                        + "the rest length");
+        assertEquals(0.25, ((Number) map.get("gravity")).doubleValue(), 1e-9,
+                "mild gravity keeps the graph centred without collapsing it");
+        assertEquals(true, map.get("tile"),
+                "tile=true keeps disconnected components in separate bounding boxes");
+        assertEquals(120.0, ((Number) map.get("componentSpacing")).doubleValue(), 0.0,
+                "componentSpacing must give a visible gap between components "
+                        + "(43×43 SVG-badge nodes + padding)");
+        assertEquals(2500.0, ((Number) map.get("numIter")).doubleValue(), 0.0,
+                "numIter must be ≥2000 so label-scaled boxes have time to "
+                        + "converge to a non-overlapping layout");
+    }
+
+    /**
+     * COSE server-supplied options are honoured. When the Java bridge
+     * forwards an options object (the coseLayoutOptions payload from
+     * /api/load-graph), the cose-branch in runLayout() must NOT
+     * overwrite any value the server explicitly set. This is the
+     * contract that lets the user dial the simulation via setLayoutOptions().
+     */
+    @Test
+    void coseServerOptionsAreNotOverwritten() throws Exception {
+        evalViewerScript();
+        GraphData data = sampleGraph();
+        List<Map<String, Object>> elements = data.toCytoscapeElements(null);
+        jsContext.eval("js", buildAtomicScript(elements));
+
+        // Server supplies a tight custom config. The bridge must keep it.
+        jsContext.eval("js",
+                "window.cgv_setLayoutOptions({"
+                        + "  name: 'cose',"
+                        + "  nodeRepulsion: 200000,"
+                        + "  idealEdgeLength: 200,"
+                        + "  nodeOverlap: 40,"
+                        + "  numIter: 3500,"
+                        + "  randomize: false,"
+                        + "  tile: false"
+                        + "});");
+        jsContext.eval("js", "window.cgv_setLayout('COSE');");
+
+        Map<String, Object> map = asStringKeyedMap(readLastLayoutOptions());
+        assertEquals(200000.0, ((Number) map.get("nodeRepulsion")).doubleValue(), 0.0,
+                "server-supplied nodeRepulsion must not be overwritten by the "
+                        + "JS-side cose defaults");
+        assertEquals(200.0, ((Number) map.get("idealEdgeLength")).doubleValue(), 0.0,
+                "server-supplied idealEdgeLength must not be overwritten");
+        assertEquals(40.0, ((Number) map.get("nodeOverlap")).doubleValue(), 0.0,
+                "server-supplied nodeOverlap must not be overwritten");
+        assertEquals(3500.0, ((Number) map.get("numIter")).doubleValue(), 0.0,
+                "server-supplied numIter must not be overwritten");
+        assertEquals(false, map.get("randomize"),
+                "server-supplied randomize=false must be kept (e.g. for "
+                        + "incremental runs after a Leiden preseed)");
+        assertEquals(false, map.get("tile"),
+                "server-supplied tile=false must be kept");
+    }
+
+    /**
+     * Default node style contract (added for the Einstufungsverlauf.gml
+     * fix): the fallback node style — used for nodes WITHOUT a
+     * {@code data.image} (SVG badge) — must use a small nominal box
+     * (10×10). Cytoscape.js inflates the collision bounding-box to the
+     * label dimensions when {@code nodeDimensionsIncludeLabels} is
+     * true (the COSE default), so a small base size lets long labels
+     * fit naturally without inflating the nominal width and cramping
+     * the layout. The 40×40 default that existed before this fix
+     * cramped the layout on densely-connected samples.
+     */
+    @Test
+    void defaultNodeStyleUsesCompact10x10Box() throws Exception {
+        String src = new String(java.nio.file.Files.readAllBytes(
+                java.nio.file.Paths.get("src/main/resources/static/cytoscape/cytoscape-viewer.js")),
+                java.nio.charset.StandardCharsets.UTF_8);
+        // Find the defaultStyle() function and assert that the
+        // 'node' selector block sets width: 10 / height: 10.
+        assertTrue(src.contains("function defaultStyle()"),
+                "defaultStyle() must exist in cytoscape-viewer.js");
+        // The nominal 10×10 box is the new compact default. We
+        // look for both width: 10 and height: 10 in the defaultStyle
+        // region by scanning the relevant substring.
+        int defaultStart = src.indexOf("function defaultStyle()");
+        int defaultEnd = src.indexOf("function imageNodeStyle()");
+        assertTrue(defaultStart > 0 && defaultEnd > defaultStart,
+                "defaultStyle must be defined BEFORE imageNodeStyle");
+        String defaultBlock = src.substring(defaultStart, defaultEnd);
+        assertTrue(defaultBlock.contains("'width': 10"),
+                "defaultStyle() node rule must use width:10 (small nominal box "
+                        + "for label-scaled Cytoscape layouts) — found otherwise");
+        assertTrue(defaultBlock.contains("'height': 10"),
+                "defaultStyle() node rule must use height:10");
+    }
+
+    /**
+     * SVG-badge node style contract (added for the
+     * Einstufungsverlauf.gml fix): nodes carrying a {@code data.image}
+     * — i.e. those rendered via {@code GraphNode.setSvgIcon} — must
+     * use the user-requested 43×43 size so the embedded icon sits
+     * centred without horizontal cropping. The previous 40×31 (min
+     * 50×31) was non-square and clipped badge icons on the long-edge
+     * axis.
+     */
+    @Test
+    void imageBadgeNodeStyleUsesSquare43x43Box() throws Exception {
+        String src = new String(java.nio.file.Files.readAllBytes(
+                java.nio.file.Paths.get("src/main/resources/static/cytoscape/cytoscape-viewer.js")),
+                java.nio.charset.StandardCharsets.UTF_8);
+        int imageStart = src.indexOf("function imageNodeStyle()");
+        assertTrue(imageStart > 0, "imageNodeStyle() must exist");
+        int imageEnd = src.indexOf("function preseedCommunityPositions");
+        assertTrue(imageStart > 0 && imageEnd > imageStart,
+                "imageNodeStyle must be defined BEFORE preseedCommunityPositions");
+        String imageBlock = src.substring(imageStart, imageEnd);
+        assertTrue(imageBlock.contains("'width': 43"),
+                "imageNodeStyle() must use width:43 — the user-requested "
+                        + "ideal size for SVG-badge nodes (setSvgIcon)");
+        assertTrue(imageBlock.contains("'height': 43"),
+                "imageNodeStyle() must use height:43 (square, so badges are not "
+                        + "horizontally cropped)");
+        assertTrue(imageBlock.contains("'min-width': 43"),
+                "imageNodeStyle() must set min-width:43 so Cytoscape's collision "
+                        + "detection uses the user-requested size");
+        assertTrue(imageBlock.contains("'min-height': 43"),
+                "imageNodeStyle() must set min-height:43 to match width");
+    }
+
+    /**
+     * Helper: coerce the layout-options value the MockInstance.layout
+     * callback received into a {@code Map<String,Object>}. GraalVM
+     * polyglot may marshal JS values as either a Host Map, a polyglot
+     * Value, or a JSON-deserialised map depending on the call site —
+     * we handle all three shapes.
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asStringKeyedMap(Object value) {
+        if (value == null) {
+            throw new AssertionError("layout options were not recorded — "
+                    + "MockInstance.layout() should set lastLayoutOptions");
+        }
+        if (value instanceof Map) {
+            Map<?, ?> m = (Map<?, ?>) value;
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> e : m.entrySet()) {
+                out.put(String.valueOf(e.getKey()), e.getValue());
+            }
+            return out;
+        }
+        if (value instanceof Value) {
+            Value v = (Value) value;
+            if (v.hasMembers()) {
+                Map<String, Object> out = new LinkedHashMap<>();
+                for (String key : v.getMemberKeys()) {
+                    out.put(key, v.getMember(key));
+                }
+                return out;
+            }
+        }
+        // Fall back: re-parse via Gson (last-resort for exotic polyglot
+        // shapes).
+        String json = GSON.toJson(value);
+        return GSON.fromJson(json, Map.class);
+    }
+
+
+    /**
      * Re-entrancy guard from cytoscape-viewer.js. If Java pushes data
      * twice in quick succession (e.g. setGraphData called twice), the
      * second call must not clobber the first mid-flight. The viewer
@@ -371,6 +582,25 @@ class CytoscapeViewerEndToEndTest {
                 .getMember("window").getMember(name);
     }
 
+    /**
+     * Read the layout-options object the JS-side mock recorded from the
+     * last {@code cy.layout(opts)} call. Returns {@code null} when the
+     * mock did not fire (or the option capture was bypassed). The mock
+     * stashes the JSON string on {@code globalThis.__lastLayoutOptionsJson}
+     * because direct JS→Java setter calls through a polyglot host object
+     * are fragile across GraalVM versions; we re-parse here so the
+     * coseLayoutOptions contract tests have a stable Java-shape map to
+     * assert against.
+     */
+    private Object readLastLayoutOptions() {
+        Value v = jsContext.getBindings("js")
+                .getMember("__lastLayoutOptionsJson");
+        if (v == null || v.isNull()) return null;
+        String json = v.as(String.class);
+        if (json == null || json.isEmpty()) return null;
+        return GSON.fromJson(json, Map.class);
+    }
+
     private static String loadViewerSource() throws IOException {
         for (String p : POSSIBLE_VIEWER_PATHS) {
             Path path = Paths.get(p);
@@ -525,7 +755,28 @@ class CytoscapeViewerEndToEndTest {
                 + "        resize: noop,\n"
                 + "        fit: noop,\n"
                 + "        style: function() { return { selector: noop, style: noop, fromJson: noop, update: noop, json: function() { return []; } }; },\n"
-                + "        layout: function() { return { on: noopArgs, one: noopArgs, run: noopArgs }; },\n"
+                + "        layout: function(opts) {\n"
+                + "            // Record the options object passed to cy.layout(opts)\n"
+                + "            // so the coseLayoutOptionsEndToEndTest contract checks\n"
+                + "            // can verify the cose-specific defaults (nodeRepulsion,\n"
+                + "            // nodeOverlap, idealEdgeLength, etc.) actually reach\n"
+                + "            // the layout engine. We serialise through the\n"
+                + "            // JS-side gson shim and stash the JSON string in a\n"
+                + "            // well-known global — the Java side reads it via\n"
+                + "            // getBindings('js').getMember('__lastLayoutOptionsJson').\n"
+                + "            // Calling Java setters from JS through a polyglot\n"
+                + "            // host object is fragile across GraalVM versions, so\n"
+                + "            // we keep the round-trip entirely on the JS side.\n"
+                + "            if (opts) {\n"
+                + "                try {\n"
+                + "                    globalThis.__lastLayoutOptionsJson = __jsonStringify(opts);\n"
+                + "                    __cyMockHost.hostLog('layout opts=' + globalThis.__lastLayoutOptionsJson);\n"
+                + "                } catch (e) {\n"
+                + "                    __cyMockHost.hostLog('layout opts stringify failed: ' + e);\n"
+                + "                }\n"
+                + "            }\n"
+                + "            return { on: noopArgs, one: noopArgs, run: noopArgs };\n"
+                + "        },\n"
                 + "        batch: function(fn) { if (fn) fn(); return this; },\n"
                 + "        getElementById: function() { return null; },\n"
                 + "        width: function() { return 800; },\n"
@@ -652,6 +903,13 @@ class CytoscapeViewerEndToEndTest {
         public int viewerReadyCalled = 0;
         public final AtomicReference<List<Map<String, Object>>> lastAddedElements
                 = new AtomicReference<>(null);
+        // Last layout-options object passed to cy.layout(opts). The
+        // coseLayoutOptionsEndToEndTest reads this to verify the
+        // server's coseLayoutOptions payload reaches the Cytoscape
+        // engine. Held as a raw Object because GraalVM proxy marshals
+        // JS values to either Polyglot Value or Host maps depending
+        // on the call site; the test unwraps both shapes.
+        public final AtomicReference<Object> lastLayoutOptions = new AtomicReference<>(null);
         public final MockInstance instance = new MockInstance(this);
         // JS-side log accumulator — messages pushed from polyglot
         // members get appended here so the test can dump them on failure.
@@ -674,6 +932,16 @@ class CytoscapeViewerEndToEndTest {
                 }
             }
             lastAddedElements.set(cast);
+        }
+
+        /**
+         * Store the layout-options object the JS bridge passed to
+         * {@code cy.layout(opts)}. Invoked from the JS-side mock so the
+         * value lands in a Java {@link AtomicReference} regardless of
+         * GraalVM's polyglot marshalling shape.
+         */
+        public void setLastLayoutOptions(Object opts) {
+            lastLayoutOptions.set(opts);
         }
 
         public Object makeDomElement(Object... args) {
@@ -801,7 +1069,16 @@ class CytoscapeViewerEndToEndTest {
         }
         public Object getElementById(Object... args) { return null; }
         public Object style(Object... args) { return new MockStyle(); }
-        public Object layout(Object... args) { return new MockLayout(); }
+        public Object layout(Object... args) {
+            // Record the layout options the JS bridge passed to
+            // cy.layout(opts) — used by coseLayoutOptionsEndToEndTest
+            // and the related contract check below to verify the
+            // server-side coseLayoutOptions are actually applied.
+            if (args != null && args.length > 0) {
+                owner.lastLayoutOptions.set(args[0]);
+            }
+            return new MockLayout();
+        }
         public Object fit(Object... args) { return this; }
         public Object resize(Object... args) { return this; }
         public Object batch(Object fn) {

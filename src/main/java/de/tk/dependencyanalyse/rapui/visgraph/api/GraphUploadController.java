@@ -94,9 +94,36 @@ public class GraphUploadController {
         fcose.addProperty("tile", true);
         fcose.addProperty("animate", false);
 
+        // COSE — original Compound Spring Embedder (bundled with
+        // cytoscape.min.js). Tuned so no two node bounding-boxes overlap
+        // after the layout settles and the graph spreads evenly across
+        // the full canvas width. Magnitudes are calibrated for
+        // long-label GML samples (e.g. Einstufungsverlauf.gml, 92
+        // nodes, 103 edges, German labels like "Kinderkrankengeld
+        // (KKG)"): Cytoscape.js inflates the collision box to the
+        // label dimensions, so nodeRepulsion / idealEdgeLength /
+        // componentSpacing need to leave room for those inflated
+        // boxes. See SampleGraphController.coseOpts for the rationale
+        // behind each value.
+        JsonObject cose = new JsonObject();
+        cose.addProperty("name", "cose");
+        cose.addProperty("randomize", true);
+        cose.addProperty("animate", false);
+        cose.addProperty("fit", true);
+        cose.addProperty("padding", 30);
+        cose.addProperty("nodeRepulsion", 150000);
+        cose.addProperty("nodeOverlap", 30);
+        cose.addProperty("idealEdgeLength", 150);
+        cose.addProperty("edgeElasticity", 100);
+        cose.addProperty("gravity", 0.25);
+        cose.addProperty("numIter", 2500);
+        cose.addProperty("tile", true);
+        cose.addProperty("componentSpacing", 120);
+
         root.add("elements", elements);
         root.add("cytoscapeLayoutOptions", preset);
         root.add("fcoseLayoutOptions", fcose);
+        root.add("coseLayoutOptions", cose);
 
         // Community colors — best-effort Leiden clustering; if the graph is
         // too small the helper returns an empty map and we just don't add the key.

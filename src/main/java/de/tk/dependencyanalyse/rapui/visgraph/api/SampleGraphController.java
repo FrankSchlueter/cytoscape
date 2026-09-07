@@ -257,10 +257,98 @@ colaOpts.addProperty("ungrabifyWhileSimulating", false);
 colaOpts.addProperty("refresh", 1);
 colaOpts.addProperty("animate", false);
 
+// CoSE (cytoscape-bundle.js, registered as 'cose' in cytoscape.min.js) —
+// the original Compound Spring Embedder bundled with cytoscape.min.js.
+//
+// Tuned so that
+//   • no two node bounding-boxes overlap after the layout settles
+//   • the graph spreads evenly across the full canvas width
+//   • disconnected components sit side-by-side with a visible gap
+//
+//   randomize          = true   — CoSE's spectral pre-pass works best
+//                                  from random positions; it does NOT
+//                                  understand the Leiden-community
+//                                  pre-seeding that fcose relies on
+//                                  (cytoscape-viewer.js
+//                                  preseedCommunityPositions), so
+//                                  inheriting fcose's randomize=false
+//                                  would lock the graph into the
+//                                  community grid.
+//   nodeRepulsion      = 150000 — CoSE default is 4500; with 150+
+//                                  densely-connected nodes that lets
+//                                  two near-adjacent nodes share the
+//                                  same pixel. 150000 (×33 default)
+//                                  keeps every pair separated. The
+//                                  value is intentionally generous so
+//                                  the inflated collision boxes that
+//                                  Cytoscape.js produces for long
+//                                  labels (e.g. the German node names
+//                                  in Einstufungsverlauf.gml) still
+//                                  don't overlap post-convergence.
+//   nodeOverlap        = 30     — CoSE-specific overlap push: when two
+//                                  nodes still touch after the spring
+//                                  forces converge, the layout pushes
+//                                  them apart by `nodeOverlap *
+//                                  nodeRadius`. 30 (vs. earlier 20)
+//                                  doubles the safety margin for
+//                                  label-scaled boxes.
+//   idealEdgeLength    = 150    — constant. Long enough to leave room
+//                                  for label-inflated collision boxes
+//                                  (a German label like
+//                                  "Kinderkrankengeld (KKG)" pushes
+//                                  the effective node width to ~120 px;
+//                                  a 150 px rest length keeps the
+//                                  spring force in equilibrium rather
+//                                  than fighting itself). On the
+//                                  151-node export.csv this gives ~22
+//                                  500 px of total horizontal spread,
+//                                  well within a 1500 px iframe after
+//                                  cy.fit().
+//   edgeElasticity     = 100    — CoSE default. Stiff spring so the
+//                                  rest length is actually enforced.
+//   gravity            = 0.25   — mild. Strong enough to keep the
+//                                  graph from drifting to a corner,
+//                                  weak enough not to collapse it back
+//                                  into a dense blob.
+//   numIter            = 2500   — converges in ~1 s on the 92-node /
+//                                  103-edge Einstufungsverlauf.gml
+//                                  with its long German labels (and
+//                                  in the same time on the 151-node /
+//                                  1010-edge export.csv). The extra
+//                                  1000 iterations over the previous
+//                                  default give CoSE enough time to
+//                                  push the inflated boxes apart — the
+//                                  label-scaled boxes have more "mass"
+//                                  in the repulsion sum, so the
+//                                  forces take longer to converge.
+//   tile               = true   — keeps disconnected components
+//                                  separate.
+//   componentSpacing   = 120    — visible gap between components when
+//                                  tile=true. 120 px (vs. earlier 80)
+//                                  keeps the 43×43 SVG-badge nodes
+//                                  plus their text padding from
+//                                  visually touching their neighbour.
+//   padding            = 30     — viewport margin for the final fit.
+JsonObject coseOpts = new JsonObject();
+coseOpts.addProperty("name", "cose");
+coseOpts.addProperty("randomize", true);
+coseOpts.addProperty("animate", false);
+coseOpts.addProperty("fit", true);
+coseOpts.addProperty("padding", 30);
+coseOpts.addProperty("nodeRepulsion", 150000);
+coseOpts.addProperty("nodeOverlap", 30);
+coseOpts.addProperty("idealEdgeLength", 150);
+coseOpts.addProperty("edgeElasticity", 100);
+coseOpts.addProperty("gravity", 0.25);
+coseOpts.addProperty("numIter", 2500);
+coseOpts.addProperty("tile", true);
+coseOpts.addProperty("componentSpacing", 120);
+
         root.add("elements", elements);
         root.add("cytoscapeLayoutOptions", layoutOpts);
         root.add("fcoseLayoutOptions", fcoseOpts);
         root.add("colaLayoutOptions", colaOpts);
+        root.add("coseLayoutOptions", coseOpts);
 
         // Leiden community colors — applied automatically by the cytoscape
         // viewer when fetched together with the elements (so the demo

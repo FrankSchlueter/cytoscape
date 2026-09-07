@@ -354,8 +354,17 @@
                   'text-events': 'yes',
                   'border-width': 1,
                   'border-color': '#222222',
-                  'width': 40,
-                  'height': 40
+                  // Nominal box size 10×10 — Cytoscape automatically scales
+                  // the collision bounding-box up to the label dimensions
+                  // when nodeDimensionsIncludeLabels is true (COSE/CoSE-Bilkent
+                  // default), so this small base lets long labels like
+                  // "Kinderkrankengeld (KKG)" fit naturally without
+                  // inflating the nominal width and cramping the layout.
+                  // Nodes with data.image (SVG badges via setSvgIcon) get
+                  // their own rule in imageNodeStyle() with the user-
+                  // requested 43×43 minimum.
+                  'width': 10,
+                  'height': 10
               }},
             { selector: 'edge',
               style: {
@@ -422,16 +431,19 @@
                 'background-image-opacity': 1,
                 'background-color': '#ffffff',
                 'corner-radius': '6px',
-                'width': 40,
-                'height': 31,
+                // User-requested ideal size for SVG-badge nodes (set via
+                // setSvgIcon): 43×43 px. Square so the embedded icon sits
+                // centred without horizontal cropping.
+                'width': 43,
+                'height': 43,
                 // Min size floor: keeps the embedded icon + type-label
                 // legible even when the underlying SVG body is narrower
                 // than the canvas expects. Cytoscape's renderer uses the
                 // max(width, min-width) for layout collision detection,
                 // so this also prevents adjacent badges from crowding
                 // each other in dense regions of the graph.
-                'min-width': 50,
-                'min-height': 31,
+                'min-width': 43,
+                'min-height': 43,
                 'border-width': 1,
                 'border-color': '#222222',
                 'label': '',
@@ -1057,7 +1069,7 @@
         layoutOpts.name = layoutName;
         // fcose needs a fit so the graph appears in the viewport on first
         // run, even when no idealEdgeLength is provided yet.
-        if (layoutName === 'fcose' || layoutName === 'cose' || layoutName === 'cose-bilkent') {
+        if (layoutName === 'fcose') {
             if (typeof layoutOpts.fit !== false) layoutOpts.fit = true;
             if (typeof layoutOpts.padding !== 'number') layoutOpts.padding = 30;
             if (typeof layoutOpts.animate !== true) layoutOpts.animate = false;
@@ -1079,6 +1091,72 @@
             if (typeof layoutOpts.nodeRepulsion !== 'number') layoutOpts.nodeRepulsion = 18000;
             if (typeof layoutOpts.gravity !== 'number') layoutOpts.gravity = 0.05;
             if (typeof layoutOpts.edgeElasticity !== 'number') layoutOpts.edgeElasticity = 0.45;
+        } else if (layoutName === 'cose' || layoutName === 'cose-bilkent') {
+            // CoSE (original Compound Spring Embedder, bundled with
+            // cytoscape.min.js). DIFFERENT defaults than fcose because
+            // (a) COSE does NOT understand the Leiden-community grid
+            // pre-seeded by preseedCommunityPositions() — starting from
+            // random positions lets its spectral pre-pass and
+            // multi-level decomposition actually do useful work; and
+            // (b) the cose defaults that ship with cytoscape.min.js
+            // (nodeRepulsion=4500, edgeElasticity=100, gravity=0.25)
+            // collapse a 150-node / 1000-edge graph into a tight blob
+            // because adjacent nodes end up sharing the same pixel.
+            //
+            // Magnitudes below are calibrated for the
+            // Einstufungsverlauf.gml sample (92 nodes, 103 edges, long
+            // German labels like "Kinderkrankengeld (KKG)"). With
+            // nodeDimensionsIncludeLabels=true (COSE default) Cytoscape
+            // inflates the collision box to the label dimensions, so
+            // nodeRepulsion / idealEdgeLength / componentSpacing need
+            // to leave enough room for those label-scaled boxes:
+            //   - idealEdgeLength=150: ~3× a typical label-box diagonal
+            //   - nodeRepulsion=150000: keeps label-scaled boxes apart
+            //   - nodeOverlap=30: post-convergence safety margin
+            //   - componentSpacing=120: visible gap between components
+            //   - numIter=2500: ~1 s on the 92-node sample, converges
+            //     cleanly even with inflated label boxes
+            //
+            // Mirrors the server values so a custom REST endpoint that
+            // omits coseLayoutOptions still gets the same look.
+            if (typeof layoutOpts.fit !== false) layoutOpts.fit = true;
+            if (typeof layoutOpts.padding !== 'number') layoutOpts.padding = 30;
+            if (typeof layoutOpts.animate !== true) layoutOpts.animate = false;
+            // randomize=true: required for CoSE's spectral / multi-level
+            // pre-pass. The Leiden-community grid (preseeded in JS) is
+            // honoured only by fcose, so CoSE must start fresh.
+            if (typeof layoutOpts.randomize === 'undefined') layoutOpts.randomize = true;
+            if (typeof layoutOpts.nodeRepulsion !== 'number') layoutOpts.nodeRepulsion = 150000;
+            // nodeOverlap is the cose-specific overlap push:
+            // post-convergence the layout separates any two touching
+            // nodes by `nodeOverlap * nodeRadius` so they never share
+            // a pixel. 30 leaves a generous safety margin for
+            // label-scaled boxes.
+            if (typeof layoutOpts.nodeOverlap !== 'number') layoutOpts.nodeOverlap = 30;
+            // idealEdgeLength=150 px: leaves room for label-inflated
+            // collision boxes (a label like "Kinderkrankengeld (KKG)"
+            // pushes the effective node width to ~120 px; the rest
+            // length must be larger so the spring is in equilibrium
+            // rather than fighting itself).
+            if (typeof layoutOpts.idealEdgeLength !== 'number' && typeof layoutOpts.idealEdgeLength !== 'function') {
+                layoutOpts.idealEdgeLength = 150;
+            }
+            // CoSE default edgeElasticity is 100 (stiff spring) — much
+            // higher than fcose's 0.45.
+            if (typeof layoutOpts.edgeElasticity !== 'number') layoutOpts.edgeElasticity = 100;
+            // Mild gravity: strong enough to keep the graph centred,
+            // weak enough not to collapse it back into a blob.
+            if (typeof layoutOpts.gravity !== 'number') layoutOpts.gravity = 0.25;
+            // tile=true keeps disconnected components in separate
+            // bounding boxes; componentSpacing sets the visible gap.
+            if (typeof layoutOpts.tile === 'undefined') layoutOpts.tile = true;
+            if (typeof layoutOpts.componentSpacing !== 'number') layoutOpts.componentSpacing = 120;
+            // Convergence budget: ~1 s on 92 nodes / 103 edges with
+            // label-scaled boxes; longer than the 151-node export.csv
+            // case because CoSE has to push the inflated boxes apart
+            // (more iterations needed when each box has more "mass"
+            // in the repulsion sum).
+            if (typeof layoutOpts.numIter !== 'number') layoutOpts.numIter = 2500;
         } else if (layoutName === 'cola') {
             // cola (cytoscape.js-cola 1.6.0 + bundled WebCola from 2016).
             //
