@@ -119,5 +119,77 @@ class GraphConfigurationDialogDiscoveryTest {
         assertEquals(List.of("product", "bundle", "ownerProduct"),
                 GraphConfigurationDialog.Discovery.tagWhitelist());
     }
+
+    @Test
+    void allNodesHaveExplicitNodeTypeWhenEveryNodeCarriesIt() {
+        GraphNode n1 = new GraphNode("a", List.of("Class"),
+                Map.of("_nodeType_", "Class"));
+        GraphNode n2 = new GraphNode("b", List.of("BatchReader"),
+                Map.of("_nodeType_", "BatchReader"));
+        GraphData data = new GraphData(List.of(n1, n2), Collections.emptyList());
+        assertTrue(GraphConfigurationDialog.Discovery.publicAllNodesHaveExplicitNodeType(data));
+    }
+
+    @Test
+    void allNodesHaveExplicitNodeTypeFalseWhenAnyNodeMissesIt() {
+        GraphNode n1 = new GraphNode("a", List.of("Class"),
+                Map.of("_nodeType_", "Class"));
+        GraphNode n2 = new GraphNode("b", List.of("BatchReader"),
+                Collections.emptyMap());
+        GraphData data = new GraphData(List.of(n1, n2), Collections.emptyList());
+        assertFalse(GraphConfigurationDialog.Discovery.publicAllNodesHaveExplicitNodeType(data));
+    }
+
+    @Test
+    void allNodesHaveExplicitNodeTypeFalseForEmptyGraph() {
+        GraphData data = new GraphData(Collections.emptyList(), Collections.emptyList());
+        assertFalse(GraphConfigurationDialog.Discovery.publicAllNodesHaveExplicitNodeType(data));
+    }
+
+    @Test
+    void allNodesHaveExplicitNodeTypeFalseWhenPropertyValueIsBlank() {
+        GraphNode n1 = new GraphNode("a", List.of("Class"),
+                Map.of("_nodeType_", ""));
+        GraphData data = new GraphData(List.of(n1), Collections.emptyList());
+        assertFalse(GraphConfigurationDialog.Discovery.publicAllNodesHaveExplicitNodeType(data));
+    }
+
+    @Test
+    void potentialLeidenClusterCountReturnsZeroForEmptyGraph() {
+        // Empty graph → compute() returns an empty map → 0 communities.
+        GraphData data = new GraphData(Collections.emptyList(), Collections.emptyList());
+        assertEquals(0,
+                GraphConfigurationDialog.Discovery.publicPotentialLeidenClusterCount(data));
+    }
+
+    @Test
+    void potentialLeidenClusterCountMatchesLeidenColorsOutput() {
+        // Three nodes in a chain: a-b-c. Leiden produces a single community
+        // (perfectly modular). The count helper must mirror the palette
+        // cardinality of the underlying compute() call.
+        GraphNode a = new GraphNode("a", List.of("X"), Map.of("_nodeType_", "X"));
+        GraphNode b = new GraphNode("b", List.of("X"), Map.of("_nodeType_", "X"));
+        GraphNode c = new GraphNode("c", List.of("X"), Map.of("_nodeType_", "X"));
+        List<de.tk.dependencyanalyse.rapui.visgraph.data.GraphRelationship> edges = List.of(
+                new de.tk.dependencyanalyse.rapui.visgraph.data.GraphRelationship(
+                        "e1", "REL", a, b, Collections.emptyMap()),
+                new de.tk.dependencyanalyse.rapui.visgraph.data.GraphRelationship(
+                        "e2", "REL", b, c, Collections.emptyMap())
+        );
+        GraphData data = new GraphData(List.of(a, b, c), edges);
+        int count = GraphConfigurationDialog.Discovery.publicPotentialLeidenClusterCount(data);
+        // The helper mirrors the distinct-color count of LeidenColors.compute.
+        // A 3-node chain typically folds into 1 community; the contract is
+        // that the helper is non-negative and matches LeidenColors.compute.
+        assertTrue(count >= 0);
+        assertEquals((int) de.tk.dependencyanalyse.rapui.visgraph.LeidenColors.compute(data)
+                        .values().stream().distinct().count(),
+                count);
+    }
+
+    @Test
+    void leidenClusterCapIsExposed() {
+        assertTrue(GraphConfigurationDialog.Discovery.leidenClusterCap() >= 2);
+    }
 }
 

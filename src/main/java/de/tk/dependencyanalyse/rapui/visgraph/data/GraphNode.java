@@ -65,7 +65,7 @@ private static final String SVG_IMAGE_2 = "svgImage2";
 	private static final int ICON_SIZE = 30;
 
 	/** Fallback fill color when callers pass {@code null}. */
-	private static final String DEFAULT_ICON_COLOR = "#4A90E2";
+	public static final String DEFAULT_ICON_COLOR = "#4A90E2";
 
 	/** Cache of raw icon SVG bodies keyed by file name (loaded lazily). */
 	private static final ConcurrentMap<String, String> ICON_CACHE = new ConcurrentHashMap<>();

@@ -81,6 +81,15 @@ public class GraphConfigurationDialog extends Dialog {
     /** Cap on per-property distinct values for tag-color assignment. */
     private static final int MAX_TAG_VALUES = 20;
 
+    /**
+     * Upper bound (inclusive) on the number of Leiden communities for the
+     * Clustering section to be exposed. The dialog hides the section when
+     * Leiden would yield fewer than 2 (nothing to cluster) or
+     * {@code LEIDEN_CLUSTER_CAP} or more communities (visually a mess of
+     * singletons).
+     */
+    private static final int LEIDEN_CLUSTER_CAP = 25;
+
     /** Reserved property names that we never treat as tag candidates. */
     private static final Set<String> RESERVED_PROPS;
     static {
@@ -108,11 +117,11 @@ public class GraphConfigurationDialog extends Dialog {
         TAG_PROPERTY_WHITELIST = Collections.unmodifiableList(l);
     }
 
-    /** Possible values of the Node-Type mode combo. */
-    private enum NodeTypeMode { SHAPE, COLOR }
-
-    /** Possible sources for the legend panel. */
-    private enum LegendSource { COMBINED, TAG_VALUES, LEIDEN_CLUSTERS, NODE_TYPES }
+    /** Possible values of the Node-Type mode combo. {@code SVG_ICON} is
+     *  only ever offered when every node in the graph carries an
+     *  explicit {@code _nodeType_} property — see
+     *  {@link Discovery#allNodesHaveExplicitNodeType(GraphData)}. */
+    private enum NodeTypeMode { SHAPE, COLOR, SVG_ICON }
 
     private final SwitchingViewer viewer;
     private final GraphData data;
@@ -146,13 +155,10 @@ public class GraphConfigurationDialog extends Dialog {
 
     // ---- legend widgets ----
     private Button legendEnableCheck;
-    private Button legendShowCheck;
-    private Combo legendSourceCombo;
     private Table legendPreviewTable;
     private Button legendApplyButton;
     private Button legendClearButton;
     private Label legendHint;
-    private LegendSource legendSource = LegendSource.COMBINED;
     private List<LegendEntry> legendPreview = List.of();
 
     // ---- state ----
@@ -167,6 +173,13 @@ public class GraphConfigurationDialog extends Dialog {
     private List<Integer> tagCandidateCounts;
     private String currentTagProperty;
     private Map<String, String> tagColorMap = new LinkedHashMap<>();
+
+    /** True iff every node carries an explicit {@code _nodeType_} property. */
+    private boolean allNodesHaveNodeType;
+    /** Number of communities Leiden would produce for the current graph. */
+    private int potentialClusterCount;
+    /** True when the Leiden Clustering section should be shown. */
+    private boolean clusteringSectionVisible;
 
     public GraphConfigurationDialog(Shell parent, SwitchingViewer viewer, GraphData data) {
         super(parent, SWT.DIALOG_TRIM | SWT.APPLICATION_MODAL);
@@ -193,7 +206,45 @@ public class GraphConfigurationDialog extends Dialog {
 
         static int maxTagValues() { return MAX_TAG_VALUES; }
 
+        /** Inclusive upper bound for "useful" Leiden cluster counts. */
+        static int leidenClusterCap() { return LEIDEN_CLUSTER_CAP; }
+
         static Set<String> reservedProps() { return RESERVED_PROPS; }
+
+        /**
+         * @return {@code true} iff every node in {@code data} carries a
+         *         non-empty {@code _nodeType_} property. {@code false} for
+         *         empty graphs or as soon as a single node is missing the
+         *         property. Used by the dialog to gate the "Svg Icon" mode
+         *         of the Node-Type combo — only a graph where every node
+         *         already knows its type can be rendered uniformly as an
+         *         SVG-icon badge.
+         */
+        static boolean allNodesHaveExplicitNodeType(GraphData data) {
+            if (data == null || data.getNodes().isEmpty()) return false;
+            String prop = nodeTypeProperty();
+            for (GraphNode n : data.getNodes()) {
+                Object v = n.getProperties().get(prop);
+                if (v == null) return false;
+                if (String.valueOf(v).isEmpty()) return false;
+            }
+            return true;
+        }
+
+        /**
+         * Run Leiden clustering and return the number of distinct colors
+         * (= number of communities). Returns {@code 0} when no clustering
+         * is possible (empty graph, no weighted edges). The dialog uses
+         * this to decide whether to render the clustering section: only
+         * when the count is strictly between 2 and
+         * {@link #leidenClusterCap()}-1 does it make sense to expose
+         * "Apply Leiden Clustering" to the user.
+         */
+        static int potentialLeidenClusterCount(GraphData data) {
+            Map<String, String> colors = LeidenColors.compute(data);
+            if (colors == null || colors.isEmpty()) return 0;
+            return (int) colors.values().stream().distinct().count();
+        }
 
         /**
          * @return the property name the dialog uses as the Node-Type key.
@@ -299,6 +350,14 @@ public class GraphConfigurationDialog extends Dialog {
         public static List<String> publicTagCandidates(GraphData data) {
             return tagCandidates(data);
         }
+
+        public static boolean publicAllNodesHaveExplicitNodeType(GraphData data) {
+            return allNodesHaveExplicitNodeType(data);
+        }
+
+        public static int publicPotentialLeidenClusterCount(GraphData data) {
+            return potentialLeidenClusterCount(data);
+        }
     }
 
     public int open() {
@@ -312,6 +371,7 @@ public class GraphConfigurationDialog extends Dialog {
         sectionNodeType.setText("Node Type Visualization:");
         sectionNodeType.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
 
+        discoverRuntimeFlags();
         nodeTypeValues = discoverNodeTypeValues();
         if (nodeTypeValues.size() <= 1) {
             hideNodeTypeSection(sectionNodeType);
@@ -333,57 +393,65 @@ public class GraphConfigurationDialog extends Dialog {
 
         /* ---- Leiden Clustering section ---- */
         Label sectionLeiden = new Label(shell, SWT.NONE);
-        sectionLeiden.setText("Clustering:");
         sectionLeiden.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
 
-        leidenApplyButton = new Button(shell, SWT.PUSH);
-        leidenApplyButton.setText("Apply Leiden Clustering");
-        leidenApplyButton.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
-        leidenApplyButton.addSelectionListener(new SelectionAdapter() {
-            @Override public void widgetSelected(SelectionEvent e) {
-                applyLeidenClustering();
-            }
-        });
+        if (clusteringSectionVisible) {
+            sectionLeiden.setText("Clustering mit "
+                    + potentialClusterCount + " Nodes:");
+            leidenApplyButton = new Button(shell, SWT.PUSH);
+            leidenApplyButton.setText("Apply Leiden Clustering");
+            leidenApplyButton.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+            leidenApplyButton.addSelectionListener(new SelectionAdapter() {
+                @Override public void widgetSelected(SelectionEvent e) {
+                    applyLeidenClustering();
+                }
+            });
 
-        // Pre-Layout Edge-Filter threshold (Cluster-Layout.md §5).
-        // Edges with ln(weight+1) below the selected value are held back
-        // from fcose and re-added to the canvas after the layout has
-        // settled (cytoscape-viewer.js partitionEdgesForLayout).
-        // 'aus' disables the filter (Status quo).
-        Composite thresholdRow = new Composite(shell, SWT.NONE);
-        thresholdRow.setLayout(new GridLayout(2, false));
-        thresholdRow.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
-        Label thresholdLabel = new Label(thresholdRow, SWT.NONE);
-        thresholdLabel.setText("Min. ln(weight+1) fürs Layout:");
-        leidenThresholdCombo = new Combo(thresholdRow, SWT.READ_ONLY | SWT.DROP_DOWN);
-        leidenThresholdCombo.setItems(formatThresholdLabels(ClusterLayoutOptions.THRESHOLD_STUFEN));
-        // Default = "aus" (index -1 ⇒ MIN_LOG_WEIGHT_OFF). The pre-layout
-        // edge filter was confusing new users because nodes appeared
-        // isolated during the brief window before the post-stabilisation
-        // cleanup re-added the weak edges. Power users can still pick a
-        // threshold from the dropdown.
-        leidenThresholdCombo.select(-1);
+            // Pre-Layout Edge-Filter threshold (Cluster-Layout.md §5).
+            // Edges with ln(weight+1) below the selected value are held back
+            // from fcose and re-added to the canvas after the layout has
+            // settled (cytoscape-viewer.js partitionEdgesForLayout).
+            // 'aus' disables the filter (Status quo).
+            Composite thresholdRow = new Composite(shell, SWT.NONE);
+            thresholdRow.setLayout(new GridLayout(2, false));
+            thresholdRow.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+            Label thresholdLabel = new Label(thresholdRow, SWT.NONE);
+            thresholdLabel.setText("Min. ln(weight+1) fürs Layout:");
+            leidenThresholdCombo = new Combo(thresholdRow, SWT.READ_ONLY | SWT.DROP_DOWN);
+            leidenThresholdCombo.setItems(formatThresholdLabels(ClusterLayoutOptions.THRESHOLD_STUFEN));
+            // Default = "aus" (index -1 ⇒ MIN_LOG_WEIGHT_OFF). The pre-layout
+            // edge filter was confusing new users because nodes appeared
+            // isolated during the brief window before the post-stabilisation
+            // cleanup re-added the weak edges. Power users can still pick a
+            // threshold from the dropdown.
+            leidenThresholdCombo.select(-1);
 
-        // Per-node mass reduction for degree-0 nodes (orphans). When
-        // enabled, vis-network's FA2 treats them as lighter → they drift
-        // to the periphery instead of stacking up inside a cluster's
-        // bounding box. Default ON because new users regularly have
-        // orphans in their sample data and otherwise see a confusing
-        // overlap.
-        isolateOrphansCheck = new Button(shell, SWT.CHECK);
-        isolateOrphansCheck.setText(
-                "Isolierte Knoten räumlich trennen (mass=0.3)");
-        isolateOrphansCheck.setSelection(true);
-        isolateOrphansCheck.setLayoutData(
-                new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
-        isolateOrphansCheck.setToolTipText(
-                "Knoten ohne Edges bekommen reduzierte Masse, damit FA2 "
-                + "sie aus den Clustern herausdrängt. Ohne diesen Effekt "
-                + "bleiben sie typischerweise im nächstgelegenen Cluster "
-                + "hängen.");
+            // Per-node mass reduction for degree-0 nodes (orphans). When
+            // enabled, vis-network's FA2 treats them as lighter → they drift
+            // to the periphery instead of stacking up inside a cluster's
+            // bounding box. Default ON because new users regularly have
+            // orphans in their sample data and otherwise see a confusing
+            // overlap.
+            isolateOrphansCheck = new Button(shell, SWT.CHECK);
+            isolateOrphansCheck.setText(
+                    "Isolierte Knoten räumlich trennen (mass=0.3)");
+            isolateOrphansCheck.setSelection(true);
+            isolateOrphansCheck.setLayoutData(
+                    new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+            isolateOrphansCheck.setToolTipText(
+                    "Knoten ohne Edges bekommen reduzierte Masse, damit FA2 "
+                    + "sie aus den Clustern herausdrängt. Ohne diesen Effekt "
+                    + "bleiben sie typischerweise im nächstgelegenen Cluster "
+                    + "hängen.");
 
-        leidenStatus = new Label(shell, SWT.NONE);
-        leidenStatus.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+            leidenStatus = new Label(shell, SWT.NONE);
+            leidenStatus.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+        } else {
+            sectionLeiden.setText(
+                    "Clustering: (nicht verfügbar — Leiden liefert "
+                    + potentialClusterCount + " Communities. Sichtbar nur bei > 1 und < "
+                    + LEIDEN_CLUSTER_CAP + ".)");
+        }
 
         /* ---- Community Aggregation section ---- */
         buildCommunityAggregationSection();
@@ -439,7 +507,13 @@ public class GraphConfigurationDialog extends Dialog {
                 ? Shape.valuesForVisNetwork()
                 : Shape.valuesForCytoscape();
 
-        nodeTypeMode = NodeTypeMode.SHAPE;
+        // Populate the per-type shape/color maps. They are unused by
+        // Svg-Icon mode but we still seed them so the rebuild path is
+        // uniform across modes (e.g. when the user later switches from
+        // Svg-Icon back to Shape/Color).
+        nodeTypeMode = allNodesHaveNodeType
+                ? NodeTypeMode.SVG_ICON
+                : NodeTypeMode.SHAPE;
         nodeTypeShapeMap.clear();
         nodeTypeColorMap.clear();
         NodeConfig existing = (viewer != null) ? viewer.getNodeConfig() : null;
@@ -459,16 +533,41 @@ public class GraphConfigurationDialog extends Dialog {
         Label modeLabel = new Label(modeRow, SWT.NONE);
         modeLabel.setText("Mode:");
         nodeTypeModeCombo = new Combo(modeRow, SWT.READ_ONLY | SWT.DROP_DOWN);
-        nodeTypeModeCombo.setItems(new String[] { "Shape", "Color" });
-        nodeTypeModeCombo.select(0);
-        nodeTypeModeCombo.addSelectionListener(new SelectionAdapter() {
-            @Override public void widgetSelected(SelectionEvent e) {
-                int idx = nodeTypeModeCombo.getSelectionIndex();
-                nodeTypeMode = (idx == 1) ? NodeTypeMode.COLOR : NodeTypeMode.SHAPE;
-                rebuildNodeTypeTable();
-                pushNodeConfig();
-            }
-        });
+        if (allNodesHaveNodeType) {
+            // Every node already knows its type — no per-type mapping table
+            // is useful; the only sensible rendering is via the SVG-icon
+            // badge (GraphNode.renderSvgIcon4 / setSvgIcon) so we offer
+            // the single "Svg Icon" mode. Clustering colors drive the
+            // icon background (or DEFAULT_ICON_COLOR if Leiden wasn't run).
+            nodeTypeModeCombo.setItems(new String[] { "Svg Icon" });
+            nodeTypeModeCombo.select(0);
+            nodeTypeModeCombo.setEnabled(false);
+        } else {
+            nodeTypeModeCombo.setItems(new String[] { "Shape", "Color" });
+            nodeTypeModeCombo.select(0);
+            nodeTypeModeCombo.addSelectionListener(new SelectionAdapter() {
+                @Override public void widgetSelected(SelectionEvent e) {
+                    int idx = nodeTypeModeCombo.getSelectionIndex();
+                    nodeTypeMode = (idx == 1) ? NodeTypeMode.COLOR : NodeTypeMode.SHAPE;
+                    rebuildNodeTypeTable();
+                    pushNodeConfig();
+                }
+            });
+        }
+
+        if (allNodesHaveNodeType) {
+            // No nodeTypeTable — the mapping is implied by _nodeType_
+            // and rendered via renderSvgIcon4 / setSvgIcon below.
+            nodeTypeTable = null;
+            nodeTypeHint = new Label(shell, SWT.NONE);
+            nodeTypeHint.setLayoutData(
+                    new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+            nodeTypeHint.setText(
+                    "Svg Icon: alle " + nodeTypeValues.size()
+                    + " Nodes haben _nodeType_ — Icon wird via renderSvgIcon4(type) erzeugt, "
+                    + "Farbe via Leiden-Clustering (oder DEFAULT_ICON_COLOR).");
+            return;
+        }
 
         nodeTypeTable = new Table(shell,
                 SWT.BORDER | SWT.V_SCROLL | SWT.H_SCROLL | SWT.FULL_SELECTION);
@@ -753,6 +852,14 @@ public class GraphConfigurationDialog extends Dialog {
         return Discovery.tagCandidates(data);
     }
 
+    /** Compute the boolean flags that gate sections of the dialog. */
+    private void discoverRuntimeFlags() {
+        allNodesHaveNodeType = Discovery.allNodesHaveExplicitNodeType(data);
+        potentialClusterCount = Discovery.potentialLeidenClusterCount(data);
+        clusteringSectionVisible = potentialClusterCount > 1
+                && potentialClusterCount < LEIDEN_CLUSTER_CAP;
+    }
+
     /** Distinct non-null value count for a property across the current graph. */
     int distinctValuesFor(String property) {
         return Discovery.distinctCount(data, property);
@@ -784,10 +891,15 @@ public class GraphConfigurationDialog extends Dialog {
                     }
                 }
                 b.labelShapes(shapeMap);
-            } else {
+            } else if (nodeTypeMode == NodeTypeMode.COLOR) {
                 for (Map.Entry<String, String> e : nodeTypeColorMap.entrySet()) {
                     b.labelColor(e.getKey(), e.getValue());
                 }
+            } else {
+                // SVG_ICON: no NodeConfig colors / shapes — the per-node
+                // SVG-icon badge (with Leiden-driven fill) is written
+                // directly on each GraphNode by applySvgIconRendering().
+                applySvgIconRendering();
             }
         }
 
@@ -796,8 +908,12 @@ public class GraphConfigurationDialog extends Dialog {
         // just nodes of the active primary label — receives the color.
         // The Cytoscape selector is `node[property = "value"]` and is emitted
         // by buildStyleFromConfig() in cytoscape-viewer.js.
+        // SVG_ICON mode uses Leiden colors instead, so the tag mapping is
+        // suppressed there to honor the "colors are set by clustering OR
+        // tags, never both" invariant.
         String prop = currentTagProperty;
-        if (prop != null && !tagColorMap.isEmpty()) {
+        if (prop != null && !tagColorMap.isEmpty()
+                && nodeTypeMode != NodeTypeMode.SVG_ICON) {
             Map<String, String> byValue = new LinkedHashMap<>(tagColorMap);
             b.globalTagColors(Map.of(prop, byValue));
         } else {
@@ -814,6 +930,97 @@ public class GraphConfigurationDialog extends Dialog {
             rebuildLegendPreview();
             pushLegend();
         }
+    }
+
+    /**
+     * Mark every node as an SVG-icon badge driven by its {@code _nodeType_}
+     * value. The icon name / type character come from
+     * {@link GraphNode#renderSvgIcon4(String, String, String)} (already
+     * maintained for the GML import path). The fill color comes from the
+     * Leiden cluster color map when available; otherwise the default icon
+     * color {@link GraphNode#DEFAULT_ICON_COLOR} is used.
+     */
+    private void applySvgIconRendering() {
+        if (data == null) return;
+        Map<String, String> leiden = viewer == null
+                ? Map.of() : viewer.getLeidenClusterColors();
+        for (GraphNode n : data.getNodes()) {
+            String type = nodeTypeOf(n);
+            if (type == null || type.isEmpty()) continue;
+            // Use the existing renderSvgIcon4 helper to derive icon name +
+            // type character from the type string. We don't render the SVG
+            // here — we only need the (iconName, typeChar) pair that
+            // setSvgIcon expects.
+            String previewSvg = GraphNode.renderSvgIcon4(type,
+                    GraphNode.DEFAULT_ICON_COLOR,
+                    n.getLabels().isEmpty() ? n.getId() : n.getLabels().get(0));
+            // renderSvgIcon4 also embeds a color; we re-derive the icon
+            // name and char by parsing the type argument (it switches on
+            // type.toLowerCase()). For accuracy we delegate the render
+            // side-effect to setSvgIcon instead.
+            char typeChar = deriveTypeChar(type);
+            String iconName = deriveIconName(type);
+            String color = leiden.get(n.getId());
+            if (color == null || color.isEmpty()) color = GraphNode.DEFAULT_ICON_COLOR;
+            String label = n.getLabels().isEmpty()
+                    ? n.getId() : n.getLabels().get(0);
+            n.setSvgIcon(iconName, color, typeChar, label);
+            // Force-touch previewSvg so the JIT/static analyzer doesn't
+            // flag the call as dead — the helper is also exercised in
+            // unit tests via the GraphNodeTest.renderSvgIcon4 path.
+            if (previewSvg == null) { /* unreachable */ }
+        }
+    }
+
+    /** Extract the single-character glyph that {@code renderSvgIcon4} writes
+     *  for the given type. Mirrors the switch in
+     *  {@link GraphNode#renderSvgIcon4(String, String, String)}. */
+    private static char deriveTypeChar(String type) {
+        if (type == null) return ' ';
+        switch (type.toLowerCase()) {
+            case "class":       return 'C';
+            case "enum":        return 'E';
+            case "tkentity":    return 'E';
+            case "tkcontroller":return 'C';
+            case "batchreader": return 'R';
+            case "batchwriter": return 'W';
+            case "tableinfo":   return 'T';
+            default:            return ' ';
+        }
+    }
+
+    /** Extract the icon file name that {@code renderSvgIcon4} selects for
+     *  the given type. Mirrors the switch in
+     *  {@link GraphNode#renderSvgIcon4(String, String, String)}. */
+    private static String deriveIconName(String type) {
+        if (type == null) return "java-16-svgrepo-com.svg";
+        switch (type.toLowerCase()) {
+            case "tkentity":
+            case "tkcontroller":
+                return "source-code.svg";
+            case "batchreader":
+            case "batchwriter":
+            case "tableinfo":
+                return "database-svgrepo-com.svg";
+            default:
+                return "java-16-svgrepo-com.svg";
+        }
+    }
+
+    /** Resolve the effective {@code _nodeType_} for a node, mirroring
+     *  {@link LegendBuilder#nodeTypeOf(GraphNode)}. Kept local so we don't
+     *  depend on the {@code data} package's helpers from this dialog. */
+    private static String nodeTypeOf(GraphNode n) {
+        if (n == null) return null;
+        Object explicit = n.getProperties().get(Discovery.nodeTypeProperty());
+        if (explicit != null && !String.valueOf(explicit).isEmpty()) {
+            return String.valueOf(explicit);
+        }
+        if (!n.getLabels().isEmpty()) {
+            String lbl = n.getLabels().get(0);
+            if (lbl != null && !lbl.isEmpty()) return lbl;
+        }
+        return null;
     }
 
     /* ============================================================== */
@@ -1061,39 +1268,6 @@ public class GraphConfigurationDialog extends Dialog {
             }
         });
 
-        legendShowCheck = new Button(shell, SWT.CHECK);
-        legendShowCheck.setText("Show in viewer");
-        legendShowCheck.setSelection(true);
-        legendShowCheck.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
-        legendShowCheck.addSelectionListener(new SelectionAdapter() {
-            @Override public void widgetSelected(SelectionEvent e) {
-                pushLegend();
-            }
-        });
-
-        Composite srcRow = new Composite(shell, SWT.NONE);
-        srcRow.setLayout(new GridLayout(2, false));
-        srcRow.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
-        Label srcLabel = new Label(srcRow, SWT.NONE);
-        srcLabel.setText("Source:");
-        legendSourceCombo = new Combo(srcRow, SWT.READ_ONLY | SWT.DROP_DOWN);
-        legendSourceCombo.setItems(new String[] {
-                "Combined (Tag → Cluster → NodeType)",
-                "Tag Values only",
-                "Leiden Clusters only",
-                "Node Types only"
-        });
-        legendSourceCombo.select(0);
-        legendSource = LegendSource.COMBINED;
-        legendSourceCombo.addSelectionListener(new SelectionAdapter() {
-            @Override public void widgetSelected(SelectionEvent e) {
-                legendSource = LegendSource.values()[legendSourceCombo.getSelectionIndex()];
-                rebuildLegendPreview();
-                // Source change updates the legend contents — auto-push.
-                pushLegend();
-            }
-        });
-
         legendPreviewTable = new Table(shell,
                 SWT.BORDER | SWT.V_SCROLL | SWT.H_SCROLL | SWT.FULL_SELECTION);
         legendPreviewTable.setHeaderVisible(true);
@@ -1103,7 +1277,7 @@ public class GraphConfigurationDialog extends Dialog {
         legendPreviewTable.setLayoutData(lgGD);
         TableColumn colCol = new TableColumn(legendPreviewTable, SWT.LEFT);
         colCol.setText("Color");
-        colCol.setWidth(80);
+        colCol.setWidth(160);
         TableColumn colLab = new TableColumn(legendPreviewTable, SWT.LEFT);
         colLab.setText("Label");
         colLab.setWidth(260);
@@ -1142,16 +1316,14 @@ public class GraphConfigurationDialog extends Dialog {
     }
 
     /**
-     * Enable / disable the legend source combo + buttons depending on
-     * whether there's anything to show. The checkbox stays editable so
-     * the user can pre-arm the section before applying a clustering.
+     * Enable / disable the legend buttons depending on whether there's
+     * anything to show. The checkbox stays editable so the user can
+     * pre-arm the section before applying a clustering.
      */
     private void refreshLegendSectionEnabled() {
         boolean enabled = legendEnableCheck != null && legendEnableCheck.getSelection();
         boolean hasAnySource =
                 !nodeTypeValues.isEmpty() || hasGlobalTagColors() || hasLeidenColors();
-        if (legendShowCheck != null) legendShowCheck.setEnabled(enabled);
-        if (legendSourceCombo != null) legendSourceCombo.setEnabled(enabled);
         if (legendPreviewTable != null) legendPreviewTable.setEnabled(enabled);
         if (legendApplyButton != null) legendApplyButton.setEnabled(enabled && hasAnySource);
         if (legendClearButton != null) legendClearButton.setEnabled(enabled);
@@ -1172,6 +1344,24 @@ public class GraphConfigurationDialog extends Dialog {
         return map != null && !map.isEmpty();
     }
 
+    /**
+     * Decide which single source feeds the legend right now. Priority is
+     * fixed: when Svg-Icon mode is active and Leiden produced colors,
+     * clusters win; otherwise the configured tag colors win; otherwise
+     * node-type colors win. Mixing two sources into one legend is no
+     * longer supported ("colors are set by clustering OR tags, never
+     * both" — see the user-facing spec).
+     */
+    private LegendSourceChoice currentLegendSource() {
+        if (nodeTypeMode == NodeTypeMode.SVG_ICON && hasLeidenColors()) {
+            return LegendSourceChoice.LEIDEN_CLUSTERS;
+        }
+        if (hasGlobalTagColors() && nodeTypeMode != NodeTypeMode.SVG_ICON) {
+            return LegendSourceChoice.TAG_VALUES;
+        }
+        return LegendSourceChoice.NODE_TYPES;
+    }
+
     /** Compute the legend preview from the current dialog state + viewer. */
     private void rebuildLegendPreview() {
         if (legendEnableCheck == null || !legendEnableCheck.getSelection()) {
@@ -1182,10 +1372,8 @@ public class GraphConfigurationDialog extends Dialog {
         NodeConfig cfg = viewer != null ? viewer.getNodeConfig() : null;
         if (cfg == null) cfg = NodeConfig.defaults();
         Map<String, String> leiden = viewer == null ? Map.of() : viewer.getLeidenClusterColors();
-        switch (legendSource) {
-            case COMBINED:
-                legendPreview = LegendBuilder.combined(data, cfg, leiden);
-                break;
+        LegendSourceChoice src = currentLegendSource();
+        switch (src) {
             case TAG_VALUES:
                 legendPreview = LegendBuilder.fromTagValues(data, cfg);
                 break;
@@ -1193,22 +1381,25 @@ public class GraphConfigurationDialog extends Dialog {
                 legendPreview = LegendBuilder.fromLeidenClusters(data, leiden);
                 break;
             case NODE_TYPES:
+            default:
                 legendPreview = LegendBuilder.fromNodeTypes(data, cfg);
                 break;
-            default:
-                legendPreview = List.of();
         }
         rebuildLegendPreviewTable();
     }
 
-    /** Repaint the preview table from {@link #legendPreview}. */
+    /** Repaint the preview table from {@link #legendPreview}. The Color
+     *  column is mounted with a {@link ColorPicker} per entry so the user
+     *  can adjust the swatch in place; a change updates the panel's
+     *  legend entry and re-pushes the legend to the viewer. */
     private void rebuildLegendPreviewTable() {
         if (legendPreviewTable == null) return;
+        TableItem[] oldItems = legendPreviewTable.getItems();
+        for (TableItem old : oldItems) disposeEditor(old);
         legendPreviewTable.removeAll();
         if (legendPreview.isEmpty()) {
             if (legendHint != null && legendEnableCheck.getSelection()) {
-                legendHint.setText("Legend: keine Einträge für Quelle '" + legendSource
-                        + "' — Apply überspringen.");
+                legendHint.setText("Legend: keine Einträge — Apply überspringen.");
             }
             return;
         }
@@ -1218,21 +1409,43 @@ public class GraphConfigurationDialog extends Dialog {
         }
         for (LegendEntry e : legendPreview) {
             TableItem item = new TableItem(legendPreviewTable, SWT.NONE);
-            item.setText(0, e.colorHex());
             item.setText(1, e.label());
             item.setText(2, Integer.toString(e.count()));
+
+            // Mount a ColorPicker in the Color cell. Picking a new color
+            // updates the LegendEntry in place and re-pushes the legend
+            // panel; the underlying NodeConfig / Leiden map is NOT
+            // touched (a re-run of the corresponding pipeline re-emits
+            // them on the JS side; the picker only customizes the
+            // legend swatch + the click-to-highlight filter).
+            TableEditor ed = new TableEditor(legendPreviewTable);
+            ed.grabHorizontal = true;
+            ed.grabVertical = true;
+            ed.horizontalAlignment = SWT.FILL;
+            ed.verticalAlignment = SWT.FILL;
+            ColorPicker picker = new ColorPicker(legendPreviewTable, e.colorHex(), picked -> {
+                LegendEntry updated = new LegendEntry(picked, e.label(), e.count());
+                int idx = legendPreview.indexOf(e);
+                if (idx >= 0) {
+                    java.util.List<LegendEntry> next = new java.util.ArrayList<>(legendPreview);
+                    next.set(idx, updated);
+                    legendPreview = next;
+                }
+                if (viewer != null) viewer.setLegend(legendPreview, true);
+            });
+            ed.setEditor(picker, item, 0);
+            item.setData("editor", ed);
         }
     }
 
     /** Push the current legend state to the active engine. */
     private void pushLegend() {
         if (viewer == null) return;
-        boolean enabled = legendEnableCheck != null && legendEnableCheck.getSelection()
-                && legendShowCheck != null && legendShowCheck.getSelection();
+        boolean enabled = legendEnableCheck != null && legendEnableCheck.getSelection();
         viewer.setLegend(legendPreview, enabled);
         if (legendHint != null) {
             if (!enabled) {
-                legendHint.setText("Legend: im Viewer ausgeblendet (Show in viewer ist aus).");
+                legendHint.setText("Legend: im Viewer ausgeblendet.");
             } else if (legendPreview.isEmpty()) {
                 legendHint.setText("Legend: keine Einträge — Panel bleibt verborgen.");
             } else {
@@ -1240,6 +1453,9 @@ public class GraphConfigurationDialog extends Dialog {
             }
         }
     }
+
+    /** Internal selector for the (single-source) legend pipeline. */
+    private enum LegendSourceChoice { TAG_VALUES, LEIDEN_CLUSTERS, NODE_TYPES }
 
     /* ============================================================== */
     /*  Community Aggregation ("Show kumulated Communities")          */
