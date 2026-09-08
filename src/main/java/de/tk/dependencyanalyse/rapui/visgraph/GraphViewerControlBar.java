@@ -376,7 +376,7 @@ public class GraphViewerControlBar extends Composite {
             case CIRCULAR:              return "Circular";
             case CONCENTRIC:            return "Concentric";
             case COSE:                  return "COSE";
-            case COSE_BILKENT:          return "COSE-Bilkent";
+            //case COSE_BILKENT:          return "COSE-Bilkent";
             case FCOSE:                 return "fcose";
             case DAGRE:                 return "Dagre";
             case BREADTHFIRST:          return "Breadth-First";

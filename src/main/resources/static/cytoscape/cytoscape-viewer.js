@@ -252,22 +252,16 @@
                 elements: [],
                 style: defaultStyle().concat([imageNodeStyle()]),
                 layout: { name: 'preset' },
-                // wheelSensitivity intentionally NOT set — Cytoscape's
-                // default (= 1) lets the browser's native wheel-zoom
-                // semantics drive the pan/zoom, which feels natural on
-                // every mouse + OS combo. Setting it to a small value
-                // (e.g. 0.2) makes the canvas zoom 5× more aggressively
-                // than the user expects, and Cytoscape logs a console
-                // warning about exactly that ("You have set a custom
-                // wheel sensitivity. This will make your app zoom
-                // unnaturally when using mainstream mice."). Our earlier
-                // 0.2 setting also caused the "zoom away and it
-                // disappears" symptom — at 0.2 sensitivity one scroll
-                // tick is enough to push the zoom past minZoom.
-                // minZoom: 0.25 keeps the graph visible even at the
-                // extreme-out end (smaller values lose the silhouette),
-                // maxZoom: 5 leaves room for inspecting individual
-                // node badges without breaking the layout.
+                // wheelSensitivity: kleiner Wert = feinere Zoom-Schritte
+                // pro Mausrad-Tick. Cytoscape's Default ist 1, was sich
+                // recht grob anfühlt. 0.25 macht jeden Tick ~4x feiner,
+                // bleibt aber gross genug, dass minZoom/maxZoom nicht in
+                // einem Tick uebersprungen werden (bei 0.2 verschwand
+                // der Graph in einem Tick nach aussen).
+                // minZoom: 0.25 haelt den Graph auch am extremen Out-Zoom
+                // noch sichtbar, maxZoom: 5 erlaubt das Inspizieren
+                // einzelner Node-Badges ohne das Layout zu sprengen.
+                wheelSensitivity: 0.25,
                 minZoom: 0.25,
                 maxZoom: 5
             });

@@ -42,7 +42,7 @@ public enum LayoutAlgorithm {
     CIRCULAR        (false, true),
     CONCENTRIC      (false, true),
     COSE            (false, true),
-    COSE_BILKENT    (false, true),
+    //COSE_BILKENT    (false, true),
     FCOSE           (false, true),
     DAGRE           (false, true),
     BREADTHFIRST    (false, true),
