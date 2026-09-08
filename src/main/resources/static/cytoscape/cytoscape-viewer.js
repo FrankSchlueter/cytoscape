@@ -367,13 +367,38 @@
                   'target-arrow-color': '#888888',
                   'target-arrow-shape': 'triangle',
                   'curve-style': 'bezier',
-                  // Only render the label when the edge actually has one
-                  // (avoids "no mapping for property label" warnings on every
-                  // unlabelled relationship).
-                  'label': function(ele){ return ele.data('label') || ''; },
+                  // Edge-Label: wenn eine `weight`-Property vorhanden ist, wird deren
+                  // Wert als Label benutzt (z.B. "42" oder "1.5"). Sonst
+                  // Fallback auf data.label. So sieht der Anwender die
+                  // Kantenstaerke direkt auf der Kante, ohne erst einen
+                  // Tooltip oeffnen zu muessen. Leeres Label wird weiterhin
+                  // unterdrueckt, damit ungewichtete Kanten kein leeres
+                  // Label-Rendering erzeugen.
+                  'label': function(ele){
+                      var w = ele.data('weight');
+                      if (w !== undefined && w !== null && w !== '') {
+                          return String(w);
+                      }
+                      return ele.data('label') || '';
+                  },
                   'font-size': 9,
                   'color': '#444444',
                   'text-rotation': 'autorotate',
+                  // Label-Hintergrund: uebermalt die Kante unter dem
+                  // Label mit einem weissen, abgerundeten Rechteck +
+                  // duennem grauen Rahmen, damit das weight-Label auch
+                  // dann lesbar bleibt, wenn die Linie direkt darunter
+                  // verlaeuft. Cytoscape rendert den Hintergrund nur,
+                  // wenn das Label non-empty ist, deshalb gibt es bei
+                  // ungewichteten Kanten keine zusaetzliche Grafik.
+                  'text-background-color': '#ffffff',
+                  'text-background-opacity': 1,
+                  'text-background-padding': 2,
+                  'text-background-shape': 'roundrectangle',
+                  'text-border-width': 1,
+                  'text-border-color': '#888888',
+                  'text-border-opacity': 1,
+                  'text-border-style': 'solid',
                   'text-events': 'yes'
               }},
             { selector: 'node:selected',

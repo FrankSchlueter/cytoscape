@@ -1058,9 +1058,11 @@ public final class GraphNode {
      * {@code data} fields so the Cytoscape style-selector can match on them
      * without having to dereference the properties sub-object.</p>
      *
-     * <p>A {@code tooltip} field is added to {@code data} (built from the
-     * node properties by {@link TooltipBuilder}) so the JS bridge can use
-     * it for native Cytoscape tooltips.</p>
+     * <p>A {@code tooltip} field is added to {@code data} (built by
+     * {@link TooltipBuilder} from {@code tooltipProperties}, plus a
+     * {@code Type} row injected from {@code _nodeType_}). The construction
+     * mirrors {@link #toVisNetworkData(NodeConfig)} so the user sees the
+     * exact same table in both engines.</p>
      */
     public Map<String, Object> toCytoscapeNode() {
         Map<String, Object> data = new LinkedHashMap<>();
@@ -1110,10 +1112,22 @@ public final class GraphNode {
         if (cytoscapeImage != null && !cytoscapeImage.isEmpty()) {
             data.put(IMAGE, cytoscapeImage);
         }
-        // Tooltip: prefer override, otherwise build from properties.
+        // Tooltip: identisch zu toVisNetworkData() aufgebaut, damit Cytoscape
+        // und vis-network exakt dieselbe Tabelle zeigen (Property-Keys +
+        // "Type"-Zeile aus _nodeType_, Title-Zeile aus _title_ bzw. id).
+        // Wir mutieren tooltipProperties idempotent (Vis-Pfad macht das
+        // ebenso), deshalb sind wiederholte Aufrufe gefahrlos.
+        Object titleProperty = visualAttrs.get("_title_");
+        Object nodeTypeProperty = visualAttrs.get("_nodeType_");
+        if (nodeTypeProperty != null && !String.valueOf(nodeTypeProperty).isEmpty()) {
+            tooltipProperties.put("Type", nodeTypeProperty);
+        }
         String tooltip = tooltipOverride
                 ? customTooltip
-                : TooltipBuilder.fromProperties(id, properties);
+                : TooltipBuilder.fromProperties(
+                        titleProperty != null && !String.valueOf(titleProperty).isEmpty()
+                                ? titleProperty.toString() : id,
+                        tooltipProperties);
         if (tooltip != null && !tooltip.isEmpty()) {
             data.put("tooltip", tooltip);
         }
