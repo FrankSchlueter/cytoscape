@@ -1,5 +1,6 @@
 package de.tk.dependencyanalyse.rapui.visgraph;
 
+import de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphData;
 import de.tk.dependencyanalyse.rapui.visgraph.data.LayoutAlgorithm;
 import de.tk.dependencyanalyse.rapui.visgraph.engine.GraphEngine;
@@ -36,6 +37,11 @@ import java.nio.file.Paths;
  *
  * <p>Cytoscape has no notion of physics — the "Physics" / "Auto-Fit" widgets
  * are disabled in Cytoscape mode. vis-network uses them as before.</p>
+ *
+ * <p>The "Show Node Label" checkbox toggles {@link NodeConfig#isShowTitle()}
+ * on the active engine. Both engines honour the flag (vis-network drops the
+ * {@code label} field; Cytoscape hides the on-node text via a style
+ * selector), so the checkbox is enabled for both.</p>
  */
 public class GraphViewerControlBar extends Composite {
 
@@ -94,6 +100,7 @@ public class GraphViewerControlBar extends Composite {
     private Combo layoutCombo;
     private Button physicsButton;
     private Button autoFitButton;
+    private Button showNodeLabelButton;
     private Button fitButton;
     private Button configButton;
     private Button loadDataButton;
@@ -123,7 +130,7 @@ public class GraphViewerControlBar extends Composite {
     }
 
     private void buildUi() {
-        GridLayout layout = new GridLayout(10, false);
+        GridLayout layout = new GridLayout(11, false);
         layout.marginHeight = 4;
         layout.marginWidth = 4;
         setLayout(layout);
@@ -188,6 +195,24 @@ public class GraphViewerControlBar extends Composite {
                 // layout always runs with fit:true and ignores this
                 // flag.
                 viewer.setAutoFitOnStabilization(autoFitButton.getSelection());
+            }
+        });
+
+        /* ---- Show Node Label (both engines) ---- */
+        showNodeLabelButton = new Button(this, SWT.CHECK);
+        showNodeLabelButton.setText("Show Node Label");
+        showNodeLabelButton.setSelection(switching.getNodeConfig().isShowTitle());
+        showNodeLabelButton.setToolTipText("Show or hide the on-node label for the active engine.");
+        showNodeLabelButton.addSelectionListener(new SelectionAdapter() {
+            @Override public void widgetSelected(SelectionEvent e) {
+                // NodeConfig.showTitle is honoured by both bridges
+                // (VisJsBridge / CytoscapeJsBridge push it to JS as
+                // 'showTitle'); toggling it re-renders the canvas without
+                // reloading data. We pull the live config first so any
+                // label/color overrides pushed via the Graph
+                // Configuration dialog survive the round-trip.
+                NodeConfig cfg = switching.getNodeConfig();
+                switching.setNodeConfig(cfg.withShowTitle(showNodeLabelButton.getSelection()));
             }
         });
 
@@ -378,7 +403,7 @@ public class GraphViewerControlBar extends Composite {
             case COSE:                  return "COSE";
             //case COSE_BILKENT:          return "COSE-Bilkent";
             case FCOSE:                 return "fcose";
-            case DAGRE:                 return "Dagre";
+            //case DAGRE:                 return "Dagre";
             case BREADTHFIRST:          return "Breadth-First";
             //case COLA:                  return "Cola";
             case NULL:                  return "Null (preset)";

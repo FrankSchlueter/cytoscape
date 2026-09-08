@@ -53,4 +53,19 @@ class GraphViewerControlBarListenerTest {
         assertTrue(slice.contains("viewer.setAutoFitOnStabilization"),
                 "the auto-fit listener must forward to viewer.setAutoFitOnStabilization(...)");
     }
+
+    @Test
+    void showNodeLabelButtonIsWiredToSetNodeConfig() throws IOException {
+        String src = Files.readString(Path.of(SRC));
+        int block = src.indexOf("showNodeLabelButton = new Button");
+        assertTrue(block > 0, "showNodeLabelButton must be created in the control bar");
+        String slice = src.substring(block,
+                Math.min(src.length(), block + 1500));
+        assertTrue(slice.contains("showNodeLabelButton.addSelectionListener"),
+                "showNodeLabelButton.addSelectionListener must appear in the construction block");
+        assertTrue(slice.contains("withShowTitle"),
+                "the show-node-label listener must derive a NodeConfig via withShowTitle(...)");
+        assertTrue(slice.contains("switching.setNodeConfig"),
+                "the show-node-label listener must push the derived config back via switching.setNodeConfig(...)");
+    }
 }

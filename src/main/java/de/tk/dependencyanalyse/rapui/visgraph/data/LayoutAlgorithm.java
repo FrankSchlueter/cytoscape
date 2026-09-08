@@ -44,7 +44,7 @@ public enum LayoutAlgorithm {
     COSE            (false, true),
     //COSE_BILKENT    (false, true),
     FCOSE           (false, true),
-    DAGRE           (false, true),
+    // DAGRE           (false, true),
     BREADTHFIRST    (false, true),
     //COLA            (false, true),
     NULL            (false, true),
