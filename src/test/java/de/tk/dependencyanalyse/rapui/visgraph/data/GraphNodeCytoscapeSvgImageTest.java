@@ -119,6 +119,36 @@ class GraphNodeCytoscapeSvgImageTest {
                 "raw '<' must not appear unescaped inside the <text> element");
     }
 
+    /**
+     * Guard against the descriptor-slot regression: prior to the unified
+     * {@code svgImage2} slot, {@link GraphNode#setSvgShape(String, String, String)}
+     * wrote its descriptor under a key that {@link GraphNode#getSvgImage()}
+     * never read, so {@code applyRecolors} silently skipped the GML-loaded
+     * nodes and "Apply Tag Colors" had no visible effect.
+     */
+    @Test
+    void getSvgImageReturnsDescriptorForThreeArgSetSvgShape() {
+        GraphNode n = new GraphNode("n7", List.of("Class"),
+                Map.of("name", "BatchReader"));
+        n.setSvgShape("BatchReader", "R", "#00FFFF");
+
+        // The descriptor must be reachable for the recolor pipeline to
+        // find it. Before the unified-slot fix this returned null and
+        // the badge kept its initial color after every Apply.
+        Map<String, String> descriptor = n.getSvgImage();
+        assertNotNull(descriptor,
+                "getSvgImage() must return the descriptor written by "
+                        + "setSvgShape(label, type, color) so the recolor pipeline can pick it up");
+        assertEquals("#00FFFF", descriptor.get("color"));
+        assertEquals("R", descriptor.get("type"));
+        assertEquals("BatchReader", descriptor.get("label"));
+
+        // And recolorSvgShape() must round-trip through the same slot.
+        n.recolorSvgShape("#FF00FF");
+        assertEquals("#FF00FF", n.getSvgImage().get("color"),
+                "recolorSvgShape must update the descriptor stored under svgImage2");
+    }
+
     /** Decode either a base64 or URL-encoded data:image/svg+xml URI. */
     private static String decodeSvg(String uri) {
         int comma = uri.indexOf(',');

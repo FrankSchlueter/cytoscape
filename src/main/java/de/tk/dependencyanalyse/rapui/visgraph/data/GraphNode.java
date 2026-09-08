@@ -38,9 +38,15 @@ public final class GraphNode {
 
 	private static final String TYPE = "type";
 
-	private static final String SVG_IMAGE = "svgImage";
-
-	private static final String SVG_IMAGE_2 = "svgImage2";
+	// Unified SVG-badge descriptor slot. Every setSvgShape(...) overload writes
+// its descriptor map here so consumers (getSvgImage(), recolorSvgShape(),
+// resolveCytoscapeImage(), SvgBadgeColorUpdater) read from a single key.
+// The earlier split between "svgImage" and "svgImage2" caused the GML
+// parser's setSvgShape(label, type, color) calls to land on the orphaned
+// "svgImage" key, silently skipping recoloring for image-shaped nodes —
+// see GraphNodeRecolorSvgShapeTest / SvgBadgeColorUpdaterTest /
+// TversUsageProductColorsTest for the regression coverage.
+private static final String SVG_IMAGE_2 = "svgImage2";
 
 	private static final String SHAPE = "shape";
 
@@ -669,12 +675,24 @@ public final class GraphNode {
 	 * the node's current {@code color} attribute.
 	 *
 	 * <p>
-	 * Stores both the {@code svgImage} descriptor (consumed by the Cytoscape bridge
-	 * via {@link #resolveCytoscapeImage()}) AND a pre-rendered {@code image}
-	 * data-URI plus {@code shape: image} (consumed by vis-network's
+	 * Stores both the {@code svgImage2} descriptor (consumed by the Cytoscape
+	 * bridge via {@link #resolveCytoscapeImage()} AND by
+	 * {@link SvgBadgeColorUpdater} for recoloring) AND a pre-rendered
+	 * {@code image} data-URI plus {@code shape: image} (consumed by vis-network's
 	 * {@link #toVisNetworkData()}). Without the pre-rendered data URI vis-network
 	 * would receive only the raw {@code {label,type,color}} map and refuse to draw
 	 * anything.
+	 * </p>
+	 *
+	 * <p>
+	 * The descriptor is written under the unified {@code SVG_IMAGE_2} slot so
+	 * every consumer (recolor, Cytoscape-style selector builder, vis-network
+	 * image-swap) reads from a single key. The earlier split between
+	 * {@code SVG_IMAGE} and {@code SVG_IMAGE_2} caused the GML parser's
+	 * {@code setSvgShape(label, type, color)} calls to land on the orphaned key
+	 * and silently skip recoloring for image-shaped nodes — see
+	 * {@link GraphNodeRecolorSvgShapeTest} and
+	 * {@code TversUsageProductColorsTest} for the regression coverage.
 	 * </p>
 	 */
 	public GraphNode setSvgShape(String label, String type, String color) {
@@ -683,11 +701,11 @@ public final class GraphNode {
 		info.put(TYPE, type == null ? "" : type);
 		if (color != null)
 			info.put("color", color);
-		visualAttrs.put(SVG_IMAGE, info);
+		visualAttrs.put(SVG_IMAGE_2, info);
 
 		// Pre-render so vis-network (which reads `image` directly off the
 		// serialized node) sees a ready-to-use data URI. Cytoscape ignores
-		// this and re-renders from svgImage via resolveCytoscapeImage().
+		// this and re-renders from svgImage2 via resolveCytoscapeImage().
 		String safeBg = (color == null || color.isEmpty()) ? DEFAULT_ICON_COLOR : color;
 		String rendered = renderSvgIcon4(type == null ? "" : type, safeBg, label == null ? "" : label);
 		// vis-network surface: keep URL-encoded URI (vis does not split on
@@ -724,15 +742,16 @@ public final class GraphNode {
 	/**
 	 * Replace the background color of this node's SVG badge without touching the
 	 * {@code label} / {@code type} fields. Both surfaces (the Cytoscape-specific
-	 * {@code svgImage} descriptor and the vis-network pre-rendered {@code image}
+	 * {@code svgImage2} descriptor and the vis-network pre-rendered {@code image}
 	 * URI) are updated.
 	 *
 	 * <p>
 	 * No-op when the node has not been marked as an SVG badge via
 	 * {@link #setSvgShape(String, String)} /
-	 * {@link #setSvgShape(String, String, String)} — non-badge nodes are colored
-	 * via Cytoscape's {@code background-color} style and re-rendering their SVG
-	 * would have no effect on either surface.
+	 * {@link #setSvgShape(String, String, String)} / the icon-annotation
+	 * overload — non-badge nodes are colored via Cytoscape's
+	 * {@code background-color} style and re-rendering their SVG would have
+	 * no effect on either surface.
 	 * </p>
 	 *
 	 * @param newColor hex color string (e.g. {@code "#4A90E2"}); {@code null} or
@@ -741,48 +760,43 @@ public final class GraphNode {
 	 *         {@code image} data URI was regenerated
 	 */
 	public boolean recolorSvgShape(String newColor) {
-		Object rawSvg = visualAttrs.get(SVG_IMAGE);
-		Object rawSvg2 = visualAttrs.get(SVG_IMAGE_2);
-		if (rawSvg instanceof Map<?, ?> rawMap) {
-			@SuppressWarnings("unchecked")
-			Map<String, String> info = (Map<String, String>) rawMap;
-			String safe = (newColor == null || newColor.isEmpty()) ? DEFAULT_ICON_COLOR : newColor;
-			String prev = info.get("color");
-			if (safe.equals(prev))
-				return false;
-			info.put("color", safe);
-			String label = info.getOrDefault(LABEL, "");
-			String type = info.getOrDefault(TYPE, "");
-			String rendered = renderSvgIcon4(type, safe, label);
-			visualAttrs.put(IMAGE, toSvgDataUri(rendered));
-			return true;
-		} else if (rawSvg2 instanceof Map<?, ?> rawMap) {
-			@SuppressWarnings("unchecked")
-			Map<String, String> info = (Map<String, String>) rawMap;
-			String safe = (newColor == null || newColor.isEmpty()) ? DEFAULT_ICON_COLOR : newColor;
-			String prev = info.get("color");
-			if (safe.equals(prev))
-				return false;
-			info.put("color", safe);
+		Object rawSvg = visualAttrs.get(SVG_IMAGE_2);
+		if (!(rawSvg instanceof Map<?, ?> rawMap)) return false;
+		@SuppressWarnings("unchecked")
+		Map<String, String> info = (Map<String, String>) rawMap;
+		String safe = (newColor == null || newColor.isEmpty()) ? DEFAULT_ICON_COLOR : newColor;
+		String prev = info.get("color");
+		if (safe.equals(prev)) return false;
+		info.put("color", safe);
 
-			String label = info.getOrDefault(LABEL, "");
+		// Distinguish the two setSvgShape() variants by the presence of an
+		// ICON_NAME entry. The 3-arg call (label, type, color) populates
+		// {label, type, color} and renders via renderSvgIcon4 — a single
+		// typeChar inside the annotation circle. The icon-annotation
+		// overload populates {label, iconName, type, iconBackgroundColor,
+		// circleBackgroundColor} and delegates to
+		// SvgRenderer.renderSvgIconWithAnnotation which composites a
+		// per-icon SVG over the typeChar circle.
+		String label = info.getOrDefault(LABEL, "");
+		String type = info.getOrDefault(TYPE, "");
+		String rendered;
+		if (info.containsKey(ICON_NAME)) {
 			String iconName = info.getOrDefault(ICON_NAME, "");
 			String iconBackgroundColor = info.getOrDefault(ICON_BACKGROUND_COLOR, "");
 			String circleBackgroundColor = info.getOrDefault(CIRCLE_BACKGROUND_COLOR, "");
-			String type = info.getOrDefault(TYPE, "");
-			String rendered = SvgRenderer.renderSvgIconWithAnnotation(iconName, iconBackgroundColor,
-					circleBackgroundColor, type.charAt(0));
-			visualAttrs.put(IMAGE, toSvgDataUri(rendered));
-			return true;
+			rendered = SvgRenderer.renderSvgIconWithAnnotation(iconName, iconBackgroundColor,
+					circleBackgroundColor, type.isEmpty() ? ' ' : type.charAt(0));
 		} else {
-			return false;
+			rendered = renderSvgIcon4(type, safe, label);
 		}
+		visualAttrs.put(IMAGE, toSvgDataUri(rendered));
+		return true;
 	}
 
 	/**
-	 * Returns the {@code svgImage} descriptor map written by
-	 * {@link #setSvgShape(String, String, String)} — or {@code null} if the node
-	 * has not been marked as an SVG badge. The returned map is the live internal
+	 * Returns the {@code svgImage2} descriptor map written by every
+	 * {@code setSvgShape(...)} overload — or {@code null} if the node has
+	 * not been marked as an SVG badge. The returned map is the live internal
 	 * map; callers MUST NOT mutate it (use {@link #recolorSvgShape(String)} for
 	 * safe updates).
 	 */
@@ -792,7 +806,7 @@ public final class GraphNode {
 	}
 
 	public boolean hasSvgImage() {
-		return visualAttrs.containsKey(SVG_IMAGE) || visualAttrs.containsKey(SVG_IMAGE_2);
+		return visualAttrs.containsKey(SVG_IMAGE_2);
 	}
 
 	public GraphNode setAttribute(String key, Object value) {
@@ -867,11 +881,12 @@ public final class GraphNode {
 				continue;
 			out.put(k, e.getValue());
 		}
-		// Re-color SVG badge nodes when a globalTagColor override matches a
-		// node property value. This is triggered by
-		// GraphConfigurationDialog.applyTagColors() ? pushNodeConfig() ?
-		// SwitchingViewer.setNodeConfig() ? VisJsBridge.applyNodeConfig() ?
-		// applyData() ? toVisNetworkData(config).
+		// For nodes that carry a RAW_SVG (set via setSvgImage, distinct
+		// from the descriptor-key path), always emit a freshly-rendered
+		// data:image URI for the `image` field so vis-network receives a
+		// ready-to-use payload. The descriptor-key path (setSvgShape) does
+		// NOT take this branch because it writes the pre-rendered URI
+		// directly via setSvgShape → visualAttrs["image"].
 		Object rawSvg = visualAttrs.get(RAW_SVG);
 		if (rawSvg instanceof String) {
 			String rawSvgString = (String) rawSvg;
@@ -950,32 +965,43 @@ public final class GraphNode {
 	 */
 	@SuppressWarnings("unchecked")
 	private String resolveCytoscapeImage(String color) {
-		// 1) svgImage descriptor from setSvgShape(...). This is the
+		// 1) svgImage2 descriptor from setSvgShape(...). This is the
 		// Cytoscape-specific entry; check it FIRST so the Cytoscape
 		// surface gets a base64-encoded URI even when setSvgShape also
 		// pre-baked a URL-encoded URI for the vis-network surface
 		// (see setSvgShape for the dual-encoding rationale).
 		Object rawSvg = visualAttrs.get(SVG_IMAGE_2);
 		if (rawSvg instanceof Map<?, ?> map) {
+			// Only the icon-annotation setSvgShape() overload carries an
+			// iconName entry. The 3-arg overload (label, type, color)
+			// leaves it null and pre-renders the URI into the IMAGE
+			// attribute — we fall through to that pre-rendered URI
+			// rather than producing an empty data:image/svg+xml payload.
 			String iconName = stringify(map.get(ICON_NAME));
-			String type = stringify(map.get(TYPE));
-			String iconBackgroundColor = color != null ? color : stringify(map.get(ICON_BACKGROUND_COLOR));
-			String circleBackgroundColor = stringify(map.get(CIRCLE_BACKGROUND_COLOR));
+			if (iconName != null && !iconName.isBlank()) {
+				String type = stringify(map.get(TYPE));
+				String iconBackgroundColor = color != null ? color
+						: stringify(map.get(ICON_BACKGROUND_COLOR));
+				String circleBackgroundColor = stringify(map.get(CIRCLE_BACKGROUND_COLOR));
+				char typeChar = (type == null || type.isEmpty()) ? ' ' : type.charAt(0);
 
-			String rendered = SvgRenderer.renderSvgIconWithAnnotation(iconName, iconBackgroundColor,
-					circleBackgroundColor, type.charAt(0));
+				String rendered = SvgRenderer.renderSvgIconWithAnnotation(iconName, iconBackgroundColor,
+						circleBackgroundColor, typeChar);
 
-			// Cytoscape surface: base64, not URL-encoded. Cytoscape parses
-			// background-image as a comma-separated URL list and would split
-			// a URL-encoded SVG payload at every comma in the SVG body,
-			// silently breaking the image. Base64 has no commas and is
-			// universally supported by the browser's Image() loader that
-			// Cytoscape uses for background-image rendering.
-			return toSvgDataUri(rendered);
+				// Cytoscape surface: base64, not URL-encoded. Cytoscape parses
+				// background-image as a comma-separated URL list and would split
+				// a URL-encoded SVG payload at every comma in the SVG body,
+				// silently breaking the image. Base64 has no commas and is
+				// universally supported by the browser's Image() loader that
+				// Cytoscape uses for background-image rendering.
+				if (rendered != null) return toSvgDataUri(rendered);
+			}
 		}
 		// 2) Explicit image URL/URI from setIcon(...) / setSvgIcon(...).
 		// Pass through verbatim. For HTTP(S) URLs and short data: URIs
 		// (without embedded commas) Cytoscape can load them directly.
+		// Also the fall-through target for the 3-arg setSvgShape path
+		// (no iconName in the descriptor) — see comment above.
 		Object rawImage = visualAttrs.get(IMAGE);
 		if (rawImage instanceof String s && !s.isEmpty()) {
 			return s;
@@ -1003,33 +1029,48 @@ public final class GraphNode {
      * <p>Returns {@code null} when no visual-attribute entry requests an
      * image non-image nodes pass through untouched.</p>
      */
-    @SuppressWarnings("unchecked")
+@SuppressWarnings("unchecked")
     private String resolveCytoscapeImage() {
-        // 1) svgImage descriptor from setSvgShape(...). This is the
+        // 1) svgImage2 descriptor from setSvgShape(...). This is the
         //    Cytoscape-specific entry; check it FIRST so the Cytoscape
         //    surface gets a base64-encoded URI even when setSvgShape also
         //    pre-baked a URL-encoded URI for the vis-network surface
         //    (see setSvgShape for the dual-encoding rationale).
         Object rawSvg = visualAttrs.get(SVG_IMAGE_2);
         if (rawSvg instanceof Map<?, ?> map) {
-	        String iconName = stringify(map.get(ICON_NAME));
-	        String type  = stringify(map.get(TYPE));
-            String iconBackgroundColor = stringify(map.get(ICON_BACKGROUND_COLOR));
-	        String circleBackgroundColor = stringify(map.get(CIRCLE_BACKGROUND_COLOR));
-	        
-	        String rendered = SvgRenderer.renderSvgIconWithAnnotation(iconName, iconBackgroundColor, circleBackgroundColor, type.charAt(0));
- 
-	        // Cytoscape surface: base64, not URL-encoded. Cytoscape parses
-            // background-image as a comma-separated URL list and would split
-            // a URL-encoded SVG payload at every comma in the SVG body,
-            // silently breaking the image. Base64 has no commas and is
-            // universally supported by the browser's Image() loader that
-            // Cytoscape uses for background-image rendering.
-            return toSvgDataUri(rendered);
+            // Two distinct setSvgShape() shapes share this slot:
+            //  a) icon-annotation overload → descriptor carries iconName
+            //     and is rendered via SvgRenderer.renderSvgIconWithAnnotation
+            //  b) 3-arg overload (label, type, color) → no iconName,
+            //     rendered via renderSvgIcon4 (no nested icon SVG)
+            // For (b) we fall through to the pre-rendered IMAGE attribute
+            // (set by setSvgShape) so the user keeps the cyan default
+            // badge instead of an empty data URI.
+            String iconName = stringify(map.get(ICON_NAME));
+            if (iconName != null && !iconName.isBlank()) {
+                String type = stringify(map.get(TYPE));
+                String iconBackgroundColor = stringify(map.get(ICON_BACKGROUND_COLOR));
+                String circleBackgroundColor = stringify(map.get(CIRCLE_BACKGROUND_COLOR));
+                char typeChar = (type == null || type.isEmpty()) ? ' ' : type.charAt(0);
+                String rendered = SvgRenderer.renderSvgIconWithAnnotation(iconName,
+                        iconBackgroundColor, circleBackgroundColor, typeChar);
+
+                // Cytoscape surface: base64, not URL-encoded. Cytoscape parses
+                // background-image as a comma-separated URL list and would split
+                // a URL-encoded SVG payload at every comma in the SVG body,
+                // silently breaking the image. Base64 has no commas and is
+                // universally supported by the browser's Image() loader that
+                // Cytoscape uses for background-image rendering.
+                if (rendered != null) return toSvgDataUri(rendered);
+            }
         }
         // 2) Explicit image URL/URI from setIcon(...) / setSvgIcon(...).
         //    Pass through verbatim. For HTTP(S) URLs and short data: URIs
         //    (without embedded commas) Cytoscape can load them directly.
+        //    Also the fall-through target when the SVG_IMAGE_2 descriptor
+        //    is the 3-arg setSvgShape shape (no iconName): setSvgShape
+        //    pre-rendered the URI into the IMAGE attribute so vis-network
+        //    gets a ready-to-use payload, and we reuse it for Cytoscape.
         Object rawImage = visualAttrs.get(IMAGE);
         if (rawImage instanceof String s && !s.isEmpty()) {
             return s;

@@ -131,13 +131,13 @@ if (uris.length === 0) {
 
 **Lesson**: Layout-Runs in Cytoscape müssen in `cy.batch(...)` gewrapped sein oder auf den nächsten Render-Tick warten. Wir lösen das, indem `runPostLoadLayout` als Reaktion auf den Image-Load-Event läuft — dann ist der Render-Pass aus `cy.batch` längst abgeschlossen.
 
-### 8. vis-Network's ColorSpec nutzt `color`, NICHT `background`
+### 8. vis-Network's ColorSpec für Plain-Nodes: `color`, `highlight`, `hover`
 
-`SvgBadgeColorUpdater.applyRecolorsBoth` produziert für Plain-Nodes `{background, border}`-Updates. vis-Network's `parseOptions` aber kennt nur die Keys `color`, `highlight`, `hover`, `inherit`, `opacity` im ColorSpec — die Keys `background` und `border` werden **stillschweigend ignoriert**.
+`SvgBadgeColorUpdater.applyRecolorsBoth` produziert für Plain-Nodes (also Nodes ohne `getSvgImage()`-Descriptor) `{color, highlight, hover}`-Updates als **Strings** — also `{color: "#hex", highlight: "#hex", hover: "#hex"}`. vis-Network's `parseOptions` akzeptiert diese Top-Level-Keys im ColorSpec; die in CSS-Sprache vertrauten Keys `background` und `border` werden **stillschweigend ignoriert**.
 
-Symptom: Plain-Nodes werden in vis-Network nicht neu eingefärbt, obwohl `options.color.background` in vis-Network-State nach dem Update den neuen Wert enthält (das `background`-Property wird gespeichert, hat aber keinen Render-Effekt).
+Symptom bei falscher Wahl (z. B. `background` / `border` als Keys): Plain-Nodes werden in vis-Network nicht neu eingefärbt, obwohl `options.color.background` in vis-Network-State den neuen Wert enthält — das Property wird gespeichert, hat aber keinen Render-Effekt.
 
-**Lösung**: ColorSpec mit `color`, `highlight`, `hover` pushen:
+**Lösung** für Plain-Nodes: ColorSpec mit `color`, `highlight`, `hover` (Strings) pushen:
 
 ```java
 Map<String, Object> color = new LinkedHashMap<>();
@@ -147,7 +147,24 @@ color.put("hover", newColor);
 upd.put("color", color);
 ```
 
+**Bild-förmige Nodes** (`shape: image`, `getSvgImage() != null` — z. B. GML-importierte TVERS-Nodes) gehen **nicht** über diesen Pfad. Für sie wird in `applyRecolorsBoth` der SVG-Image-Swap-Branch gewählt und ein `{id, image: <data:image/svg+xml;base64,…>}`-Update via `vgv_applyNodeImages` verschickt. vis-Network rendert für `shape: "image"` keine ColorSpec-Tints; die einzige wirksame Recolorierung ist, den Data-URI zu tauschen. Dieser Pfad war früher ausgehebelt, weil die Descriptor-Map für GELADENE Nodes unter einem Key lag, den `getSvgImage()` nicht las — siehe **§ 8.1** unten.
+
 **Lesson**: Wenn ein Viewer eine Property-Spec hat, müssen wir die **exakten** Property-Namen verwenden — auch wenn die Namen aus einem anderen Kontext (z. B. CSS) vertraut aussehen. `background` ist CSS-Sprache, vis-Network spricht `color`.
+
+### 8.1 Vereinheitlichter Descriptor-Slot für alle `setSvgShape`-Overloads
+
+`GraphNode` bot zwei Descriptor-Slots: `svgImage` (von `setSvgShape(label, type, color)` benutzt) und `svgImage2` (von der Icon-Annotation-Overload benutzt). `getSvgImage()`, `recolorSvgShape()`, `resolveCytoscapeImage()` und `SvgBadgeColorUpdater.applyRecolors` / `applyRecolorsBoth` lasen aber nur `svgImage2`.
+
+Symptom: Für GML-importierte Graphen (`TVERS-Usage.gml`) traf der GML-Parser die 3-arg-Variante `setSvgShape(label, type, color)`, die unter `svgImage` schrieb. Damit blieben `getSvgImage()` und damit auch die Recolor-Pipeline für **alle** TVERS-Nodes unsichtbar — `Apply Tag Colors` aktualisierte zwar den Cytoscape-Stylesheet (`node[product = "..."]`), aber `background-image` aus `imageNodeStyle()` überdeckte `background-color`, und vis-Network ignoriert ColorSpec-Updates für `shape: "image"`. Beide Engines zeigten die initiale Cyan-Badge-Farbe `#00FFFF`, egal welche Produktpalette der Anwender wählte. Die Test-Suites `GraphNodeRecolorSvgShapeTest`, `SvgBadgeColorUpdaterTest` und `TversUsageProductColorsTest` liefen dadurch mit 3 bzw. 8 roten Tests.
+
+**Lösung**: Vereinheitlichung auf den `SVG_IMAGE_2`-"svgImage2"-Slot für alle `setSvgShape`-Overloads. Seither:
+
+- `getSvgImage()` liest konsistent aus `svgImage2`, der Descriptor für GML-Nodes ist sichtbar.
+- `recolorSvgShape()` rendert den SVG-Badge neu und schreibt den frischen Data-URI in das `image`-Attribut.
+- `applyRecolorsBoth` routet SVG-Badge-Nodes über den Image-Swap-Branch und Plain-Nodes über den ColorSpec-Branch (kein vermischtes Verhalten mehr).
+- `resolveCytoscapeImage()` fällt für die 3-arg-Variante (kein `iconName` im Descriptor) auf das vorberechnete `image`-Attribut zurück, statt ein leeres `data:image/svg+xml;base64,` zu liefern.
+
+Regression-Coverage: `GraphNodeRecolorSvgShapeTest`, `SvgBadgeColorUpdaterTest`, `GraphNodeCytoscapeSvgImageTest#getSvgImageReturnsDescriptorForThreeArgSetSvgShape`, und die TVERS-End-to-End-Tests in `TversUsageProductColorsTest#applyTagColorsRecolorsCytoscapeBadgeForEveryProductNode` / `applyTagColorsRecolorsSvgBadgeForEveryProductNode` / `applyRecolorsBothEmitsImageUpdatesNotColorUpdatesForBadgeNodes`.
 
 ## Strategien
 
@@ -183,12 +200,14 @@ Cytoscape hat eine **Stylesheet-Engine** mit `selector { property: value }`-Rege
 
 vis-Network hat **keine** Stylesheet-Engine — Recoloring muss **per Node** über `nodes.update()` passieren:
 ```js
-nodes.update([{ id: 'r1', color: { background: '#FF00FF' } }])
+nodes.update([{ id: 'r1', color: { background: '#FF00FF', border: '#FF00FF', highlight: { background: '#FF00FF', border: '#FF00FF' }, hover: { background: '#FF00FF', border: '#FF00FF' } } }])
 ```
+
+(`vgv_applyLeidenColors` — siehe `vis-graph-viewer.js` — nutzt diese ausführliche Form. Für Plain-Nodes ohne `shape: image` reicht die kürzere Form `{color, highlight, hover}` aus Strings.)
 
 **Konsequenz**: `SvgBadgeColorUpdater.applyRecolorsBoth` produziert für beide Viewer unterschiedliche Update-Listen:
 - `applyRecolors` (Cytoscape): nur `{id, image}` für SVG-Badges (Plain-Nodes werden via Style-Selector geupdatet)
-- `applyRecolorsBoth` (vis-Network): `{id, image}` für SVG-Badges **oder** `{id, color}` für Plain-Nodes
+- `applyRecolorsBoth` (vis-Network): `{id, image}` für SVG-Badges (alle via `setSvgShape(...)` markierten Nodes) **oder** `{id, color: {color, highlight, hover}}` für Plain-Nodes — siehe § 8 für die ColorSpec-Form
 
 ### Asynchroner Image-Load vor Layout
 
@@ -232,11 +251,13 @@ nodes.update([{ id: 'r1', color: { background: '#FF00FF' } }])
 
 **Wichtig**: `preloadSvgImagesAndRedraw` muss `cy.resize()` **immer** aufrufen, auch ohne Image-URIs, sonst bleibt die Canvas-Größe veraltet und Edges werden nicht neu gezeichnet.
 
-### vis-network-Style-Property `color.background` vs. `color.fill`
+### vis-network-Style-Property `color` vs. `fill`
 
-vis-Network akzeptiert `{background, highlight, hover, border, inherit, opacity}` für `color.background`-Updates. **Nicht** `{fill}`. Wir verwenden `{background, border}` — beides korrekt.
+vis-Network akzeptiert für Plain-Nodes die Top-Level-ColorSpec-Keys `color`, `highlight`, `hover`, `border`, `inherit`, `opacity`. **Nicht** `fill`. Wir verwenden `{color, highlight, hover}` — alle drei Keys als String-Werte (`"#hex"`). vis-network interpretiert `color` als Fill, `highlight`/`hover` als Fill in Selected- bzw. Hover-State.
 
-**Wichtig**: `applyRecolorsBoth` produziert `{background, border}` für Plain-Nodes, NICHT `{fill}`. Sonst ignoriert vis-Network das Update.
+**Wichtig**: `applyRecolorsBoth` produziert `{color, highlight, hover}` (Strings) für Plain-Nodes, **nicht** `{background, border}` (die historisch korrekten, aber von vis-network stillschweigend ignorierten CSS-Keys) und **nicht** `{fill}`. Sonst ignoriert vis-Network das Update.
+
+Für Bild-förmige Nodes (`shape: image`) wird der ColorSpec-Pfad **gar nicht** genommen — siehe § 8.1.
 
 ### Cytoscape-PNG-Image-Loads sind synchron
 
@@ -256,8 +277,8 @@ Cytoscape's Image-Cache akzeptiert **beide** Formate, aber SVG-Images sind resso
 |---|---|
 | `GraphNode.renderSvgIcon4` | Produziert SVG-Body mit Icon + Annotation-Kreis + Type-Char |
 | `SvgRenderer.renderSvgIconWithAnnotation` | Low-Level SVG-Builder für Annotation-Badges |
-| `GraphNode.setSvgShape` | Setzt `svgImage`-Descriptor und pre-rendert `image`-Data-URI |
-| `GraphNode.recolorSvgShape` | Mutiert `svgImage.color` und regeneriert Data-URI |
+| `GraphNode.setSvgShape` | Setzt `svgImage2`-Descriptor und pre-rendert `image`-Data-URI (alle Overloads schreiben in denselben Slot, siehe § 8.1) |
+| `GraphNode.recolorSvgShape` | Mutiert `svgImage2.color` und regeneriert Data-URI |
 | `GraphNode.toCytoscapeNode` / `toVisNetworkData` | Serialisiert Node für jeweiligen Viewer |
 | `GraphNode.toSvgDataUri` | **Einzige** Data-URI-Factory (Base64) |
 | `CytoscapeJsBridge.applyNodeConfig` | Pusht Config + Recoloring-Updates an Cytoscape |
@@ -296,6 +317,7 @@ Cytoscape's Image-Cache akzeptiert **beide** Formate, aber SVG-Images sind resso
 | Cytoscape "alter Graph"-Flash | `cy.batch` ist async | `cy.resize()` synchron im Load-Handler |
 | Plain-Nodes nicht Recolored (Cytoscape) | Style-Selector nicht aktualisiert | `applyNodeConfig` ruft Style-Push |
 | Plain-Nodes nicht Recolored (vis) | vis hat keine Style-Engine | `applyRecolorsBoth` pusht `{color, highlight, hover}`-Updates (ColorSpec, **nicht** `background`!) |
+| SVG-Badge-Nodes (Cytoscape + vis) nicht Recolored bei `Apply Tag Colors` | Descriptor unter altem `svgImage`-Key statt `svgImage2`; `getSvgImage()` returnte `null` | Unified Descriptor-Slot (`SVG_IMAGE_2`) für alle `setSvgShape`-Overloads + Recolor via Image-Swap statt ColorSpec (§ 8.1) |
 
 ## Quellen
 
