@@ -128,6 +128,12 @@ public class CytoscapeViewer extends Browser {
             clear();
             return;
         }
+        
+        int countNodes = data.getNodes().size();
+        int countRelationships = data.getRelationships().size();
+        if( countNodes > 300 || countRelationships > 2000 ) {
+            communityViewActive = true;
+        }
         this.currentData = data;
         runWhenReady(() -> {
             LOG.info("CytoscapeViewer: applying data (now ready)");

@@ -1,5 +1,6 @@
 package de.tk.dependencyanalyse.rapui.visgraph;
 
+import de.tk.dependencyanalyse.rapui.visgraph.callback.DsmListener;
 import de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphData;
 import de.tk.dependencyanalyse.rapui.visgraph.data.LayoutAlgorithm;
@@ -25,23 +26,26 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Composite that hosts the typical control widgets for a
- * {@link SwitchingViewer}: engine selector (vis / cytoscape), engine-specific
+ * {@link SwitchingViewer}: engine selector (vis / cytoscape / sigma), engine-specific
  * layout combo, fit-to-screen button, and an entry-point for the
  * "Graph Configuration" dialog.
  *
  * <p>The layout combo is repopulated whenever the engine changes, so each
  * engine only shows the layouts it understands.</p>
  *
- * <p>Cytoscape has no notion of physics — the "Physics" / "Auto-Fit" widgets
- * are disabled in Cytoscape mode. vis-network uses them as before.</p>
+ * <p>Cytoscape and sigma have no notion of physics — the "Physics" / "Auto-Fit"
+ * widgets are disabled for both engines. vis-network uses them as before.</p>
  *
  * <p>The "Show Node Label" checkbox toggles {@link NodeConfig#isShowTitle()}
- * on the active engine. Both engines honour the flag (vis-network drops the
+ * on the active engine. All three engines honour the flag (vis-network drops the
  * {@code label} field; Cytoscape hides the on-node text via a style
- * selector), so the checkbox is enabled for both.</p>
+ * selector; sigma hides it via a {@code nodeReducer}), so the checkbox is
+ * enabled regardless of engine.</p>
  */
 public class GraphViewerControlBar extends Composite {
 
@@ -105,6 +109,12 @@ public class GraphViewerControlBar extends Composite {
     private Button configButton;
     private Button loadDataButton;
     private Button exportGmlButton;
+    private Button dsmButton;
+    private List<DsmListener> dsmListeners = new ArrayList<>();
+
+ 
+
+
 
     private LayoutAlgorithm[] supportedLayouts;
 
@@ -129,8 +139,14 @@ public class GraphViewerControlBar extends Composite {
         switching.addEngineListener(this::onEngineChanged);
     }
 
-    private void buildUi() {
-        GridLayout layout = new GridLayout(11, false);
+    public void addDsmListener(DsmListener listener) {
+        if (listener != null && !dsmListeners.contains(listener)) {
+            dsmListeners.add(listener);
+        }
+    }
+
+   private void buildUi() {
+        GridLayout layout = new GridLayout(12, false);
         layout.marginHeight = 4;
         layout.marginWidth = 4;
         setLayout(layout);
@@ -139,13 +155,20 @@ public class GraphViewerControlBar extends Composite {
         Label lblEngine = new Label(this, SWT.NONE);
         lblEngine.setText("Engine:");
         engineCombo = new Combo(this, SWT.READ_ONLY | SWT.DROP_DOWN);
-        engineCombo.setItems(new String[] { "Vis", "Cytoscape" });
-        engineCombo.select(switching.getEngine() == GraphEngine.CYTOSCAPE ? 1 : 0);
+        engineCombo.setItems(new String[] { "Cytoscape", "Sigma", "Vis" });
+        if( switching.getEngine() == GraphEngine.CYTOSCAPE ) {
+            engineCombo.select(0);
+        } else if( switching.getEngine() == GraphEngine.SIGMA ) {
+            engineCombo.select(1);
+        } else {
+            engineCombo.select(2);
+        }
         engineCombo.addSelectionListener(new SelectionAdapter() {
             @Override public void widgetSelected(SelectionEvent e) {
                 int idx = engineCombo.getSelectionIndex();
-                if (idx == 0) switching.switchTo(GraphEngine.VIS_NETWORK);
-                else if (idx == 1) switching.switchTo(GraphEngine.CYTOSCAPE);
+                if (idx == 0) switching.switchTo(GraphEngine.CYTOSCAPE);
+                else if (idx == 1) switching.switchTo(GraphEngine.SIGMA);
+                else if (idx == 2) switching.switchTo(GraphEngine.VIS_NETWORK);
             }
         });
 
@@ -258,8 +281,21 @@ public class GraphViewerControlBar extends Composite {
             }
         });
 
-        Label filler = new Label(this, SWT.NONE);
-        filler.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+        dsmButton = new Button(this, SWT.PUSH);
+        dsmButton.setText("Show in DSM");
+        dsmButton.setToolTipText("");
+        dsmButton.addSelectionListener(new SelectionAdapter() {
+            @Override 
+            public void widgetSelected(SelectionEvent e) {
+                for( DsmListener listener : dsmListeners ) {
+                    listener.openDsm( switching.getGraphData() );
+                }
+            }
+        });
+
+
+        //Label filler = new Label(this, SWT.NONE);
+        //filler.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
     }
 
     private void exportGmlToClipboard() {
@@ -345,11 +381,22 @@ public class GraphViewerControlBar extends Composite {
         supportedLayouts = currentLayoutsFor(engine);
         layoutCombo.setItems(displayNamesFor(supportedLayouts));
         layoutCombo.select(defaultLayoutIndex(supportedLayouts));
+        // Only vis-network has the Physics + AutoFit concepts. Cytoscape's
+        // fcose layout always runs with fit:true and ignores the AutoFit
+        // toggle. Sigma runs FA2 once per layout command — there is no
+        // continuous physics state to toggle — so both buttons stay
+        // disabled there too.
         boolean isVis = engine == GraphEngine.VIS_NETWORK;
         physicsButton.setEnabled(isVis);
         autoFitButton.setEnabled(isVis);
         // Reflect the new engine in the engine combo.
-        engineCombo.select(isVis ? 0 : 1);
+        if (engine == GraphEngine.SIGMA) {
+            engineCombo.select(1);
+        } else if (engine == GraphEngine.CYTOSCAPE) {
+            engineCombo.select(0);
+        } else {
+            engineCombo.select(2);
+        }
         // Apply a default layout for the new engine if the previous one
         // isn't supported.
         if (supportedLayouts.length > 0) {
@@ -359,17 +406,27 @@ public class GraphViewerControlBar extends Composite {
     }
 
     private static LayoutAlgorithm[] currentLayoutsFor(GraphEngine engine) {
-        return engine == GraphEngine.CYTOSCAPE
-                ? LayoutAlgorithm.valuesForCytoscape()
-                : LayoutAlgorithm.valuesForVisNetwork();
+        if (engine == GraphEngine.CYTOSCAPE) {
+            return LayoutAlgorithm.valuesForCytoscape();
+        }
+        if (engine == GraphEngine.SIGMA) {
+            return LayoutAlgorithm.valuesForSigma();
+        }
+        return LayoutAlgorithm.valuesForVisNetwork();
     }
 
     private static int defaultLayoutIndex(LayoutAlgorithm[] layouts) {
+        // First preference for vis: FORCE_ATLAS_2D (the historical default).
+        // First preference for sigma: FORCE_DIRECTED_2_SIGMA (the weight-
+        // aware ForceAtlas2 equivalent and the engine-recommended default).
+        // First preference for cytoscape: LEIDEN_GRID → NULL → FCOSE (the
+        // existing cytoscape fallback chain is preserved).
+        for (int i = 0; i < layouts.length; i++) {
+            if (layouts[i] == LayoutAlgorithm.FORCE_DIRECTED_2_SIGMA) return i;
+        }
         for (int i = 0; i < layouts.length; i++) {
             if (layouts[i] == LayoutAlgorithm.FORCE_ATLAS_2D) return i;
         }
-        // For Cytoscape, prefer LEIDEN_GRID (places each community in
-        // its own visible cell); falls back to NULL (= preset), then FCOSE.
         for (int i = 0; i < layouts.length; i++) {
             if (layouts[i] == LayoutAlgorithm.LEIDEN_GRID) return i;
         }
@@ -409,6 +466,11 @@ public class GraphViewerControlBar extends Composite {
             case NULL:                  return "Null (preset)";
             case NONE:                  return "None (frozen)";
             case LEIDEN_GRID:           return "Leiden Grid";
+            case FORCE_ATLAS_SIGMA:         return "Sigma FA2";
+            case FORCE_DIRECTED_2_SIGMA:    return "Sigma ForceDirected2";
+            case NOVERLAP_SIGMA:            return "Sigma NoOverlap";
+            case CIRCULAR_SIGMA:            return "Sigma Circular";
+            case RANDOM_SIGMA:              return "Sigma Random";
             default:                    return a.name();
         }
     }

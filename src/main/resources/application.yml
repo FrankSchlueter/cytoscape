@@ -1,5 +1,15 @@
 server:
   port: 8085
+  # Compress REST responses (notably the sigma engine's /api/sigma/nodes
+  # + /api/sigma/edges endpoints, which deliver large graph payloads).
+  # The 151-node / 1010-edge sample CSV serialises to ~30 KB JSON; with
+  # GZIP this compresses to ~5 KB — important for large-graph UX where
+  # the same payload may be re-fetched across layout changes via
+  # If-None-Match / 304 round-trips.
+  compression:
+    enabled: true
+    mime-types: application/json,application/xml,text/html,text/plain
+    min-response-size: 1024
 
 spring:
   application:

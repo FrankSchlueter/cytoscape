@@ -147,6 +147,13 @@ public class GraphViewer extends Browser {
             clear();
             return;
         }
+        int countNodes = data.getNodes().size();
+        int countRelationships = data.getRelationships().size();
+        if( countNodes > 150 || countRelationships > 1000 ) {
+            // If the graph is too large, we don't want to render it in Vis.js because it will be slow and unresponsive. 
+            // Instead, we can show a message or handle it differently.
+            return;
+        }
         this.currentData = data;
         java.util.logging.Logger.getLogger(GraphViewer.class.getName())
                 .info("GraphViewer.setGraphData called, bridge ready=" + bridge.isViewerReady());

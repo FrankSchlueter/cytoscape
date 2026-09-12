@@ -140,6 +140,47 @@ public final class GraphData {
     }
 
     /**
+     * Serializes this graph into a graphology-style payload that sigma.js can
+     * consume via two parallel REST endpoints (one for nodes, one for edges).
+     *
+     * <p>The return shape is a Map with two keys:</p>
+     * <ul>
+     *   <li>{@code nodes} — list of {@code {key, attributes}} where
+     *       {@code key} is the node id and {@code attributes} carries
+     *       {@code label}, {@code color}, {@code nodeType}, {@code tooltip},
+     *       and the full {@code raw} property map.</li>
+     *   <li>{@code edges} — list of {@code {key, source, target, attributes}}
+     *       where {@code attributes} carries {@code label} (weight or
+     *       custom label), {@code color}, {@code size}, {@code weight},
+     *       {@code logWeight}, {@code tooltip}, {@code tooltipHeader}.</li>
+     * </ul>
+     *
+     * <p>Visual styling mirrors {@link #toCytoscapeElements} so the same
+     * {@link de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig} produces
+     * consistent colours across all three engines. Tooltips are rendered via
+     * the same {@link TooltipBuilder} helper used by the vis-network and
+     * Cytoscape serializers, so the user sees the same tooltip table on every
+     * engine.</p>
+     */
+    public Map<String, Object> toGraphologyElements(
+            de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig config) {
+        de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig cfg =
+                config == null ? de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig.defaults() : config;
+        List<Map<String, Object>> nodeOut = new ArrayList<>(nodes.size());
+        for (GraphNode n : nodes) {
+            nodeOut.add(n.toGraphologyNode(cfg));
+        }
+        List<Map<String, Object>> edgeOut = new ArrayList<>(relationships.size());
+        for (GraphRelationship r : relationships) {
+            edgeOut.add(r.toGraphologyEdge());
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("nodes", nodeOut);
+        out.put("edges", edgeOut);
+        return out;
+    }
+
+    /**
      * Serialize this graph as a GML text document.
      *
      * <p>The output mirrors the format produced by the GML ingest path of

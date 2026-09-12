@@ -1176,4 +1176,100 @@ private static final String SVG_IMAGE_2 = "svgImage2";
         out.put("data", data);
         return out;
     }
+
+    /**
+     * Serializes this node for the sigma.js engine via the graphology
+     * schema consumed by the {@code /api/sigma/nodes} REST endpoint.
+     *
+     * <p>The {@code attributes} object mirrors the Cytoscape
+     * {@code data} payload so the JS side can apply the same {@code showTitle},
+     * {@code labelColors}, {@code tagColors} and {@code globalTagColors}
+     * rules. Tooltip HTML is produced by the same {@link TooltipBuilder} as
+     * the Cytoscape and vis-network serializers, so the user sees one
+     * consistent tooltip table across all three engines.</p>
+     *
+     * <p>SVG-badge {@code data.image} is intentionally NOT serialised — the
+     * current sigma-viewer.js renders plain {@code circle} nodes only, and
+     * shipping base64 data URIs would inflate the response payload for
+     * large graphs without any visual benefit.</p>
+     */
+    public Map<String, Object> toGraphologyNode(NodeConfig config) {
+        Map<String, Object> attributes = new LinkedHashMap<>();
+        String labelText = null;
+        Object lblAttr = visualAttrs.get("label");
+        if (lblAttr != null && !String.valueOf(lblAttr).isEmpty()) {
+            labelText = String.valueOf(lblAttr);
+        } else {
+            labelText = getCaption();
+        }
+        if (labelText == null || labelText.isEmpty()) {
+            labelText = id;
+        }
+        attributes.put("label", labelText);
+
+        Object explicitNodeType = properties.get("_nodeType_");
+        if (explicitNodeType != null && !String.valueOf(explicitNodeType).isEmpty()) {
+            attributes.put("nodeType", String.valueOf(explicitNodeType));
+        } else if (!labels.isEmpty()) {
+            attributes.put("nodeType", labels.get(0));
+        }
+        Object nodeTag = properties.get("nodeTag");
+        if (nodeTag != null) {
+            attributes.put("nodeTag", String.valueOf(nodeTag));
+        }
+
+        // Resolve the effective background colour exactly like the
+        // Cytoscape-side buildStyleFromConfig() chain: NodeConfig.labelColors
+        // → NodeConfig.tagColors → visualAttrs.color → default. The sigma
+        // JS-side nodeReducer is a no-op for the colour slot, so the colour
+        // we compute here is the colour the user actually sees.
+        String color = resolveColor(config);
+        if (color != null) attributes.put("color", color);
+        Object sizeAttr = visualAttrs.get("size");
+        if (sizeAttr instanceof Number n) attributes.put("size", n.intValue());
+
+        // Tooltip via TooltipBuilder — identical to the other engines.
+        Object titleProperty = visualAttrs.get("_title_");
+        Object nodeTypeProperty = visualAttrs.get("_nodeType_");
+        if (nodeTypeProperty != null && !String.valueOf(nodeTypeProperty).isEmpty()) {
+            tooltipProperties.put("Type", nodeTypeProperty);
+        }
+        String tooltip = tooltipOverride
+                ? customTooltip
+                : TooltipBuilder.fromProperties(
+                        titleProperty != null && !String.valueOf(titleProperty).isEmpty()
+                                ? titleProperty.toString() : id,
+                        tooltipProperties);
+        if (tooltip != null && !tooltip.isEmpty()) {
+            attributes.put("tooltip", tooltip);
+        }
+
+        // Raw properties for tooltip re-hydration (e.g. context menu).
+        if (!properties.isEmpty()) {
+            Map<String, Object> raw = new LinkedHashMap<>(properties);
+            attributes.put("raw", raw);
+        }
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("key", id);
+        out.put("attributes", attributes);
+        return out;
+    }
+
+    private String resolveColor(NodeConfig config) {
+        if (config != null) {
+            String primaryLabel = labels.isEmpty() ? null : labels.get(0);
+            if (primaryLabel != null) {
+                String c = config.colorForLabel(primaryLabel);
+                if (c != null) return c;
+            }
+            for (Map.Entry<String, Object> e : properties.entrySet()) {
+                String c = config.colorForTagValue(primaryLabel, e.getKey(),
+                        String.valueOf(e.getValue()));
+                if (c != null) return c;
+            }
+        }
+        Object raw = visualAttrs.get("color");
+        return raw == null ? null : String.valueOf(raw);
+    }
 }

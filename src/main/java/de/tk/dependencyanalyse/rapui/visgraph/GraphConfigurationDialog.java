@@ -1488,15 +1488,22 @@ public class GraphConfigurationDialog extends Dialog {
         sectionCommunity.setText("Community Aggregation:");
         sectionCommunity.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
 
-        // Vis-network has no compound-node semantics — hide the section
-        // entirely and tell the user why. Engine-switch is not a hot
-        // path in the dialog so this is enough.
-        if (engine == GraphEngine.VIS_NETWORK) {
-            sectionCommunity.setText("Community Aggregation: (nicht verfügbar — vis-network unterstützt keine Compound-Knoten. Wechsle auf Cytoscape.)");
-            communityStatus = new Label(shell, SWT.NONE);
-            communityStatus.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
-            return;
-        }
+        // Vis-network and sigma both lack native compound-node aggregation —
+// sigma's graphology addNodeWithParent API is closer to a real
+// implementation but isn't wired yet. Hide the section with a hint
+// for both engines so the user knows to switch to Cytoscape to use it.
+if (engine == GraphEngine.VIS_NETWORK) {
+    sectionCommunity.setText("Community Aggregation: (nicht verfügbar — vis-network unterstützt keine Compound-Knoten. Wechsle auf Cytoscape.)");
+    communityStatus = new Label(shell, SWT.NONE);
+    communityStatus.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+    return;
+}
+if (engine == GraphEngine.SIGMA) {
+    sectionCommunity.setText("Community Aggregation: (nicht verfügbar — sigma-Engine folgt in einer späteren Iteration; wechsle auf Cytoscape.)");
+    communityStatus = new Label(shell, SWT.NONE);
+    communityStatus.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 2, 1));
+    return;
+}
 
         showAggregatedCheck = new Button(shell, SWT.CHECK);
         showAggregatedCheck.setText("Show kumulated Communities");

@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -67,5 +68,23 @@ class GraphViewerControlBarListenerTest {
                 "the show-node-label listener must derive a NodeConfig via withShowTitle(...)");
         assertTrue(slice.contains("switching.setNodeConfig"),
                 "the show-node-label listener must push the derived config back via switching.setNodeConfig(...)");
+    }
+
+    @Test
+    void showNodeLabelButtonWorksForSigmaEngine() throws IOException {
+        // Regression guard: the show-node-label checkbox must remain
+        // functional for ALL three engines (vis / cytoscape / sigma).
+        // The Sigma engine disables the Physics + AutoFit widgets but
+        // the show-node-label widget stays enabled because Sigma honours
+        // NodeConfig.showTitle via its nodeReducer.
+        String src = Files.readString(Path.of(SRC));
+        int block = src.indexOf("showNodeLabelButton = new Button");
+        assertTrue(block > 0, "showNodeLabelButton must be created in the control bar");
+        String slice = src.substring(block,
+                Math.min(src.length(), block + 800));
+        // The widget must NOT be disabled for any engine — it has no
+        // setEnabled(false) call next to its setSelection() / addSelectionListener.
+        assertFalse(slice.contains("showNodeLabelButton.setEnabled(false)"),
+                "showNodeLabelButton must NOT be disabled for Sigma (or any other engine)");
     }
 }

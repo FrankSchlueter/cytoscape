@@ -1,8 +1,12 @@
 # cytoscape-graph-viewer
 
 Spring Boot + Eclipse RAP 4.4 Webanwendung zur Visualisierung von Graphen
-mit **Cytoscape.js + cytoscape-fcose** als Default-Renderer und **vis-network**
-als zweite, zur Laufzeit umschaltbare Engine.
+mit **drei umschaltbaren Rendering-Engines**:
+
+- **Cytoscape.js + cytoscape-fcose** als Default-Renderer (gewichtet, mit Leiden-Clustering).
+- **vis-network** als zweite Engine für klassische Force-Directed-Layouts.
+- **sigma.js + graphology** als dritte Engine, optimiert für sehr große Graphen
+  via REST-basierte Datenladung (`/api/sigma/nodes`, `/api/sigma/edges`).
 
 Die Datenebene (Nodes, Relationships, Properties) ist engine-agnostisch und
 wird vom vis-graph-Projekt adaptiert. Der Beispielgraph
@@ -17,16 +21,53 @@ dem `weight`-Attribut berechnet (`idealEdgeLength = 50 + 30·log(weight)`).
 |------------------------------|------------------------------------------------------------------------|
 | `http://localhost:8085/graph`| RAP-Entry-Point mit Cytoscape-Default-View (CSV-Beispielgraph, fcose)  |
 | `GET /api/sample-graph`      | Liefert JSON: `elements`, `cytoscapeLayoutOptions`, `stats`           |
-| `/cytoscape-viewer.html`     | Eingebettetes HTML des Cytoscape-Viewers (für Debugging)              |
+| `GET /api/sigma/nodes?token=X`| Sigma-Engine: Knotenliste als graphology-Element-JSON (GZIP-komprimiert) |
+| `GET /api/sigma/edges?token=X`| Sigma-Engine: Kantenliste als graphology-Element-JSON (GZIP-komprimiert) |
+| `/sigma-viewer.html`        | Eingebettetes HTML des Sigma-Viewers (für Debugging)                   |
+| `/sigma/*`                   | Statische Sigma-Bundles (`graphology`, Layout-Pakete, `sigma.min.js`)  |
+| `/cytoscape-viewer.html`     | Eingebettetes HTML des Cytoscape-Viewers                               |
 | `/cytoscape/*`               | Statische Cytoscape-JS-Bundles + `cytoscape-viewer.js`                 |
 | `/cytoscape/cytoscape-leiden-worker.js` | Web-Worker für Leiden-Clusteranalyse im Browser            |
 
 ## Engines
 
 Das `SwitchingViewer`-Composite beherbergt zur Laufzeit entweder einen
-`GraphViewer` (vis-network) oder einen `CytoscapeViewer` (Cytoscape.js).
-Umschaltung erfolgt über die Toolbar-Combobox **Engine: Vis / Cytoscape**;
-Daten, NodeConfig und Layout bleiben erhalten.
+`GraphViewer` (vis-network), einen `CytoscapeViewer` (Cytoscape.js) oder
+einen `SigmaViewer` (sigma.js + graphology). Umschaltung erfolgt über die
+Toolbar-Combobox **Engine: Vis / Cytoscape / Sigma**; Daten, NodeConfig und
+Layout bleiben erhalten.
+
+### Sigma.js (Engine #3) — REST-basierte Datenladung
+
+Die Sigma-Engine liefert ihre Daten via REST-Endpoint (`/api/sigma/nodes`
+und `/api/sigma/edges`) statt per `BrowserFunction.exec()`. Vorteile:
+
+1. **Größere Datenmengen**: HTTP-GZIP komprimiert die JSON-Antwort.
+2. **Standard-Caching**: `If-None-Match` mit `ETag` → `304 Not Modified`.
+3. **Saubere Trennung**: REST-Endpoint ist ohne RAP-Bootstrap testbar.
+
+Der Initial-Token wird beim `applyData(...)` als `UUID` generiert, im
+server-seitigen `SigmaGraphCache` (`ConcurrentHashMap`, Cleanup via
+`UISessionListener.beforeDestroy` + 30-min-TTL-Daemon) abgelegt und in
+den iframe-HTML-Body inlineiert. Der iframe bootet, holt die Graphdaten
+via `fetch(url, { credentials: 'same-origin' })` und baut den
+`graphology`-Graphen auf.
+
+Sigma-Layouts (UMD/IIFE-Bundles lokal unter `static/sigma/`):
+
+| Layout                    | Algorithmus                                              |
+|---------------------------|----------------------------------------------------------|
+| Sigma FA2                 | `graphology-layout-forceatlas2.assign` (default settings) |
+| **Sigma ForceDirected2**  | FA2 + `Math.log10(weight+1)`-gesteuerte `edgeWeight` + NoOverlap-Post-Processing |
+| Sigma NoOverlap           | `graphology-layout-noverlap.assign` (Post-Processing)    |
+| Sigma Circular            | `graphology-layout.circular.assign` (Kreis-Layout)        |
+| Sigma Random              | `graphology-layout.random.assign` (Preseed für NoOverlap)  |
+
+Der **Sigma ForceDirected2**-Algorithmus ist das Sigma-Pendant zum
+Cytoscape-fcose-Layout: höhere `weight`-Werte ziehen die Endknoten enger
+zusammen (kürzere Equilibriumsdistanz). `graphology-layout-noverlap` mit
+einem `ratio` von ~85 % der Container-Breite sorgt dafür, dass die
+Bildschirmbreite optimal ausgenutzt wird ohne Node-Überlappung.
 
 ## Toolbar (`GraphViewerControlBar`)
 
@@ -34,10 +75,11 @@ Am unteren Bildschirmrand:
 
 | Control       | Bedeutung                                                                  |
 |---------------|----------------------------------------------------------------------------|
-| Engine        | Vis oder Cytoscape — zerstört den aktuellen Viewer und instanziiert frisch |
-| Layout        | Engine-spezifisch: vis ⇒ Force-Atlas-2D, Barnes-Hut, …; cytoscape ⇒ fcose, cose, dagre, breadthfirst, … |
+| Engine        | Vis, Cytoscape oder Sigma — zerstört den aktuellen Viewer und instanziiert frisch |
+| Layout        | Engine-spezifisch: vis ⇒ Force-Atlas-2D, Barnes-Hut, …; cytoscape ⇒ fcose, cose, dagre, breadthfirst, …; sigma ⇒ Sigma FA2, Sigma ForceDirected2, Sigma Circular, … |
 | Physics       | nur sichtbar/aktiv im Vis-Modus                                            |
 | Auto-Fit      | nur sichtbar/aktiv im Vis-Modus                                            |
+| Show Node Label | An/Aus für das on-node Label — engine-agnostisch (vis, cytoscape, sigma honorieren den `NodeConfig.showTitle`-Flag) |
 | Fit           | `fitToScreen()` auf den aktiven Viewer                                     |
 | Graph Configuration… | öffnet den `GraphConfigurationDialog` (engine-agnostisch)          |
 
@@ -229,36 +271,52 @@ src/main/java/de/tk/dependencyanalyse/rapui/visgraph/
 ├── GraphConfigurationDialog.java         # Node-Type / Tag / Clustering UI
 ├── ColorPicker.java, TreeEditorProxy.java
 ├── data/                                 # engine-agnostische Datenklassen
-│   ├── GraphData.java                   # + toCytoscapeElements()
-│   ├── GraphNode.java                   # + toCytoscapeNode()
-│   ├── GraphRelationship.java           # + toCytoscapeEdge()
+│   ├── GraphData.java                   # + toCytoscapeElements() + toGraphologyElements()
+│   ├── GraphNode.java                   # + toCytoscapeNode() + toGraphologyNode()
+│   ├── GraphRelationship.java           # + toCytoscapeEdge() + toGraphologyEdge()
 │   ├── ColorSpec.java, Shape.java, ArrowShape.java, SmoothType.java,
 │   ├── HierarchicalDirection.java, PhysicsSolver.java, TooltipBuilder.java
-│   └── LayoutAlgorithm.java             # erweitert: FCOSE, COSE, …
+│   └── LayoutAlgorithm.java             # erweitert: FORCE_ATLAS_SIGMA,
+│                                        #            FORCE_DIRECTED_2_SIGMA,
+│                                        #            NOVERLAP_SIGMA,
+│                                        #            CIRCULAR_SIGMA, RANDOM_SIGMA
 ├── internal/
 │   ├── BrowserFunctions.java, BrowserScriptQueue.java, ContextMenuSnapshot.java
-│   ├── VisJsBridge.java                 # vis-network-Bridge (kopiert)
-│   └── CytoscapeJsBridge.java           # Cytoscape-Bridge (cgv_*)
+│   ├── VisJsBridge.java                 # vis-network-Bridge (vgv_*)
+│   ├── CytoscapeJsBridge.java           # Cytoscape-Bridge (cgv_*)
+│   └── SigmaJsBridge.java               # Sigma-Bridge (vg_*)
 ├── callback/                             # Selection- / ContextMenu-Listener
-├── engine/GraphEngine.java              # VIS_NETWORK | CYTOSCAPE
+├── engine/GraphEngine.java              # VIS_NETWORK | CYTOSCAPE | SIGMA
 ├── config/
 │   ├── NodeConfig.java, NodeConfigAnalyzer.java, TagProperty.java
 ├── examples/CsvExampleEntryPoint.java   # Default-View /graph
-└── api/SampleGraphController.java       # GET /api/sample-graph
+└── api/
+    ├── SigmaGraphController.java        # Sigma REST: /api/sigma/nodes + /edges
+    ├── SigmaGraphCache.java             # Per-RAP-Session-Graph-Payload-Cache
+    ├── NodeConfigRegistry.java          # Per-RAP-Session-NodeConfig-Lookup
+    └── SampleGraphController.java       # GET /api/sample-graph
 ```
 
 ```
 src/main/resources/
-├── application.yml
+├── application.yml                      # server.compression.enabled
 ├── sample/export.csv                    # Beispielgraph
 └── static/
     ├── cytoscape-viewer.html            # HTML-Wrapper für Cytoscape
+    ├── sigma-viewer.html                # HTML-Wrapper für Sigma (URL-Inlining)
     ├── cytoscape/                       # Cytoscape-JS-Bundles
     │   ├── cytoscape.min.js
     │   ├── cytoscape-fcose.js
     │   ├── layout-base.js
     │   ├── cytoscape-viewer.js          # Bridge (cgv_*)
     │   └── cytoscape-leiden-worker.js   # Web-Worker
+    ├── sigma/                           # sigma.js + graphology-Bundles
+    │   ├── graphology.min.js
+    │   ├── graphology-layout.min.js     # circular, random
+    │   ├── graphology-layout-forceatlas2.min.js
+    │   ├── graphology-layout-noverlap.min.js
+    │   └── sigma.min.js
+    ├── sigma/sigma-viewer.js            # Bridge (vg_*) + fetch + forceDirected2
     ├── vis-network/vis-network.min.{js,css}
     └── vis-graph/                       # vis-graph-Viewer-Bridge (vgv_*)
 ```

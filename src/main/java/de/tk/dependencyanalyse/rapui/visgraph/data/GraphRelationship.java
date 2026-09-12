@@ -353,4 +353,73 @@ public final class GraphRelationship {
         out.put("data", data);
         return out;
     }
+
+    /**
+     * Serializes this relationship for the sigma.js engine via the
+     * graphology schema consumed by the {@code /api/sigma/edges} REST
+     * endpoint.
+     *
+     * <p>The {@code attributes} map mirrors the Cytoscape {@code data}
+     * payload: {@code label} (the {@code weight} value when present,
+     * otherwise the explicit label), {@code weight}, {@code logWeight},
+     * {@code size}, {@code color}, {@code tooltip}, {@code tooltipHeader}.
+     * Edge size scales logarithmically with the weight so heavy edges
+     * stand out visually (mirrors the Cytoscape sqrt-style scaling).</p>
+     */
+    public Map<String, Object> toGraphologyEdge() {
+        Map<String, Object> attributes = new LinkedHashMap<>();
+        attributes.put("id", id);
+        attributes.put("type", type);
+        Double w = getWeight();
+        if (w != null) {
+            attributes.put("weight", w);
+            attributes.put("logWeight", Math.log(getEffectiveWeight() + 1));
+        }
+        String labelText = null;
+        if (visualAttrs.containsKey("label")) {
+            Object lbl = visualAttrs.get("label");
+            if (lbl != null && !String.valueOf(lbl).isEmpty()) {
+                labelText = String.valueOf(lbl);
+            }
+        }
+        if (labelText == null && w != null) {
+            // Default edge label is the raw weight value — matches the
+            // Cytoscape-side label default in cytoscape-viewer.js.
+            labelText = formatEdgeLabel(w);
+        }
+        if (labelText != null) attributes.put("label", labelText);
+        // Sqrt-style size scaling: 0.6 + 0.9 * sqrt(min(max(logWeight, 0), 4))
+        if (w != null) {
+            double lw = Math.log(getEffectiveWeight() + 1);
+            double clamped = Math.min(Math.max(lw, 0), 4);
+            attributes.put("size", 0.6 + 0.9 * Math.sqrt(clamped));
+        }
+        Object colorAttr = visualAttrs.get("color");
+        if (colorAttr != null) attributes.put("color", String.valueOf(colorAttr));
+        String baseTooltip = tooltipOverride
+                ? customTooltip
+                : TooltipBuilder.fromProperties(id, properties);
+        if (baseTooltip != null && !baseTooltip.isEmpty()) {
+            attributes.put("tooltip", baseTooltip);
+        }
+        String header = sourceNode.getId() + " -> " + targetNode.getId();
+        attributes.put("tooltipHeader", header);
+        if (!properties.isEmpty()) {
+            Map<String, Object> raw = new LinkedHashMap<>(properties);
+            attributes.put("raw", raw);
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("key", id);
+        out.put("source", sourceNode.getId());
+        out.put("target", targetNode.getId());
+        out.put("attributes", attributes);
+        return out;
+    }
+
+    private static String formatEdgeLabel(Double w) {
+        if (w == Math.floor(w)) {
+            return Long.toString(w.longValue());
+        }
+        return String.format("%.2f", w);
+    }
 }

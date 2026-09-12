@@ -44,7 +44,7 @@ public class SwitchingViewer extends Composite {
     private LayoutAlgorithm currentLayout = LayoutAlgorithm.FORCE_ATLAS_2D;
     private Map<String, Object> currentLayoutOptions = Map.of();
     private ContextMenuProvider currentContextMenuProvider;
-    private GraphEngine currentEngine = GraphEngine.VIS_NETWORK;
+    private GraphEngine currentEngine = GraphEngine.CYTOSCAPE;
 
     /** Last Leiden cluster colors pushed via {@link #setLeidenClusterColors}. */
     private Map<String, String> currentLeidenColors = Map.of();
@@ -56,6 +56,7 @@ public class SwitchingViewer extends Composite {
 
     private GraphViewer visViewer;
     private CytoscapeViewer cytoscapeViewer;
+    private SigmaViewer sigmaViewer;
 
     private final java.util.List<NodeSelectionListener> nodeListeners = new CopyOnWriteArrayList<>();
     private final java.util.List<RelationshipSelectionListener> relListeners = new CopyOnWriteArrayList<>();
@@ -69,8 +70,8 @@ public class SwitchingViewer extends Composite {
         addListener(SWT.Dispose, disposeListener);
         setLayout(new org.eclipse.swt.layout.FillLayout());
         // Create the initial viewer (vis-network by default).
-        visViewer = new GraphViewer(this, SWT.NONE);
-        wireViewer(visViewer);
+        cytoscapeViewer = new CytoscapeViewer(this, SWT.NONE);
+        wireViewer(cytoscapeViewer);
     }
 
     public GraphEngine getEngine() {
@@ -113,6 +114,30 @@ public class SwitchingViewer extends Composite {
             if (!currentLeidenColors.isEmpty()) {
                 cytoscapeViewer.setLeidenClusterColors(currentLeidenColors);
             }
+        } else if (engine == GraphEngine.SIGMA) {
+            // Pass currentData to the SigmaViewer constructor so the
+            // initial fetch URLs can be inlined into the iframe HTML —
+            // eliminates the race between the iframe boot and the
+            // Java-side applyData(...). The bridge queues any follow-up
+            // applyData() calls via execWhenReady so the iframe can
+            // refetch on later data changes.
+            sigmaViewer = new SigmaViewer(this, SWT.NONE, null, currentData);
+            wireViewer(sigmaViewer);
+            if (currentNodeConfig != null) sigmaViewer.setNodeConfig(currentNodeConfig);
+            if (currentLayout.isSupportedBySigma()) {
+                sigmaViewer.setLayout(currentLayout);
+            } else {
+                // Previous engine's layout isn't supported by sigma —
+                // fall back to the Sigma-friendly default.
+                sigmaViewer.setLayout(LayoutAlgorithm.FORCE_DIRECTED_2_SIGMA);
+                this.currentLayout = LayoutAlgorithm.FORCE_DIRECTED_2_SIGMA;
+            }
+            if (!currentLayoutOptions.isEmpty()) {
+                sigmaViewer.setLayoutOptions(currentLayoutOptions);
+            }
+            if (!currentLeidenColors.isEmpty()) {
+                sigmaViewer.setLeidenClusterColors(currentLeidenColors);
+            }
         } else {
             visViewer = new GraphViewer(this, SWT.NONE);
             wireViewer(visViewer);
@@ -134,6 +159,8 @@ public class SwitchingViewer extends Composite {
         if (legendEnabled) {
             if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
                 cytoscapeViewer.setLegend(currentLegend, true);
+            } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
+                sigmaViewer.setLegend(currentLegend, true);
             } else if (visViewer != null) {
                 visViewer.setLegend(currentLegend, true);
             }
@@ -165,6 +192,8 @@ public class SwitchingViewer extends Composite {
         this.currentData = data;
         if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
             cytoscapeViewer.setGraphData(data);
+        } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
+            sigmaViewer.setGraphData(data);
         } else if (visViewer != null) {
             visViewer.setGraphData(data);
         }
@@ -175,6 +204,8 @@ public class SwitchingViewer extends Composite {
         this.currentNodeConfig = config;
         if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
             cytoscapeViewer.setNodeConfig(config);
+        } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
+            sigmaViewer.setNodeConfig(config);
         } else if (visViewer != null) {
             visViewer.setNodeConfig(config);
         }
@@ -184,6 +215,9 @@ public class SwitchingViewer extends Composite {
         if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
             return cytoscapeViewer.getNodeConfig();
         }
+        if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
+            return sigmaViewer.getNodeConfig();
+        }
         if (visViewer != null) {
             return visViewer.getNodeConfig();
         }
@@ -192,11 +226,16 @@ public class SwitchingViewer extends Composite {
 
     public void setLayout(LayoutAlgorithm algorithm) {
         if (algorithm == null) return;
+        // If the new layout isn't supported by the active engine, we
+        // silently refuse rather than silently fall back — callers can
+        // inspect currentLayout() to see what actually took effect.
         this.currentLayout = algorithm;
         if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
-            cytoscapeViewer.setLayout(algorithm);
+            if (algorithm.isSupportedByCytoscape()) cytoscapeViewer.setLayout(algorithm);
+        } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
+            if (algorithm.isSupportedBySigma()) sigmaViewer.setLayout(algorithm);
         } else if (visViewer != null) {
-            visViewer.setLayout(algorithm);
+            if (algorithm.isSupportedByVisNetwork()) visViewer.setLayout(algorithm);
         }
     }
 
@@ -206,6 +245,8 @@ public class SwitchingViewer extends Composite {
         this.currentLayoutOptions = options == null ? Map.of() : Map.copyOf(options);
         if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
             cytoscapeViewer.setLayoutOptions(currentLayoutOptions);
+        } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
+            sigmaViewer.setLayoutOptions(currentLayoutOptions);
         } else if (visViewer != null) {
             visViewer.setLayoutOptions(currentLayoutOptions);
         }
@@ -216,6 +257,8 @@ public class SwitchingViewer extends Composite {
         this.currentLeidenColors = Map.copyOf(colors);
         if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
             cytoscapeViewer.setLeidenClusterColors(currentLeidenColors);
+        } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
+            sigmaViewer.setLeidenClusterColors(currentLeidenColors);
         } else if (visViewer != null) {
             visViewer.setLeidenClusterColors(currentLeidenColors);
         }
@@ -263,6 +306,8 @@ public class SwitchingViewer extends Composite {
                 cytoscapeViewer.setCommunityView(false, null, dynamicSize);
             }
             cytoscapeViewer.setCommunityViewActive(enabled);
+        } else if (currentEngine == GraphEngine.SIGMA) {
+            LOG.warning("SwitchingViewer.setCommunityView: sigma engine — community aggregation not yet supported (deferred to a follow-up that wires graphology's addNodeWithParent)");
         } else {
             LOG.warning("SwitchingViewer.setCommunityView: vis-network engine — community aggregation not supported");
         }
@@ -313,6 +358,8 @@ public class SwitchingViewer extends Composite {
         this.legendEnabled = enabled;
         if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
             cytoscapeViewer.setLegend(currentLegend, enabled);
+        } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
+            sigmaViewer.setLegend(currentLegend, enabled);
         } else if (visViewer != null) {
             visViewer.setLegend(currentLegend, enabled);
         }
@@ -324,6 +371,8 @@ public class SwitchingViewer extends Composite {
         this.legendEnabled = false;
         if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
             cytoscapeViewer.clearLegend();
+        } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
+            sigmaViewer.clearLegend();
         } else if (visViewer != null) {
             visViewer.clearLegend();
         }
@@ -342,6 +391,8 @@ public class SwitchingViewer extends Composite {
     public void fitToScreen() {
         if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
             cytoscapeViewer.fitToScreen();
+        } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
+            sigmaViewer.fitToScreen();
         } else if (visViewer != null) {
             visViewer.fitToScreen();
         }
@@ -350,6 +401,8 @@ public class SwitchingViewer extends Composite {
     public void clear() {
         if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
             cytoscapeViewer.clear();
+        } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
+            sigmaViewer.clear();
         } else if (visViewer != null) {
             visViewer.clear();
         }
@@ -413,24 +466,28 @@ public class SwitchingViewer extends Composite {
         nodeListeners.add(l);
         if (visViewer != null) visViewer.addNodeSelectionListener(l);
         if (cytoscapeViewer != null) cytoscapeViewer.addNodeSelectionListener(l);
+        if (sigmaViewer != null) sigmaViewer.addNodeSelectionListener(l);
     }
 
     public void addRelationshipSelectionListener(RelationshipSelectionListener l) {
         relListeners.add(l);
         if (visViewer != null) visViewer.addRelationshipSelectionListener(l);
         if (cytoscapeViewer != null) cytoscapeViewer.addRelationshipSelectionListener(l);
+        if (sigmaViewer != null) sigmaViewer.addRelationshipSelectionListener(l);
     }
 
     public void addSelectionClearedListener(SelectionClearedListener l) {
         clearedListeners.add(l);
         if (visViewer != null) visViewer.addSelectionClearedListener(l);
         if (cytoscapeViewer != null) cytoscapeViewer.addSelectionClearedListener(l);
+        if (sigmaViewer != null) sigmaViewer.addSelectionClearedListener(l);
     }
 
     public void setContextMenuProvider(ContextMenuProvider provider) {
         this.currentContextMenuProvider = provider;
         if (visViewer != null) visViewer.setContextMenuProvider(provider);
         if (cytoscapeViewer != null) cytoscapeViewer.setContextMenuProvider(provider);
+        if (sigmaViewer != null) sigmaViewer.setContextMenuProvider(provider);
     }
 
     /* ---- internals ---- */
@@ -450,6 +507,12 @@ public class SwitchingViewer extends Composite {
         }
     }
 
+    private void wireViewer(SigmaViewer v) {
+        for (NodeSelectionListener l : nodeListeners) v.addNodeSelectionListener(l);
+        for (RelationshipSelectionListener l : relListeners) v.addRelationshipSelectionListener(l);
+        for (SelectionClearedListener l : clearedListeners) v.addSelectionClearedListener(l);
+    }
+
     private void disposeViewer() {
         if (visViewer != null && !visViewer.isDisposed()) {
             visViewer.dispose();
@@ -459,6 +522,10 @@ public class SwitchingViewer extends Composite {
             cytoscapeViewer.dispose();
         }
         cytoscapeViewer = null;
+        if (sigmaViewer != null && !sigmaViewer.isDisposed()) {
+            sigmaViewer.dispose();
+        }
+        sigmaViewer = null;
     }
 
     @Override
