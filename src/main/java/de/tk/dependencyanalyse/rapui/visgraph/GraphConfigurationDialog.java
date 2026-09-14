@@ -1401,6 +1401,24 @@ public class GraphConfigurationDialog extends Dialog {
         rebuildLegendPreviewTable();
     }
 
+    /**
+     * Human-readable target label for the Legend "Apply to Viewer" hint.
+     * Sigma and NVL are intentionally called out as no-ops — their Color
+     * Palette is auto-managed by the bridge from the per-node color maps
+     * ({@code applyNodeColors} / {@code setLeidenClusterColors}), so this
+     * dialog section has no effect on those engines.
+     */
+    private static String legendTargetLabel(GraphEngine engine) {
+        if (engine == null) return "den aktiven Viewer";
+        switch (engine) {
+            case VIS_NETWORK:  return "vis-network";
+            case CYTOSCAPE:    return "Cytoscape";
+            case SIGMA:        return "Sigma (kein Effekt — Color Palette wird automatisch verwaltet)";
+            case NEO4J_NVL:    return "NVL (kein Effekt — Color Palette wird automatisch verwaltet)";
+            default:           return "den aktiven Viewer";
+        }
+    }
+
     /** Repaint the preview table from {@link #legendPreview}. The Color
      *  column is mounted with a {@link ColorPicker} per entry so the user
      *  can adjust the swatch in place; a change updates the panel's
@@ -1417,8 +1435,9 @@ public class GraphConfigurationDialog extends Dialog {
             return;
         }
         if (legendHint != null) {
+            String target = legendTargetLabel(engine);
             legendHint.setText("Legend: " + legendPreview.size() + " Einträge — Apply to Viewer pusht sie an "
-                    + (engine == GraphEngine.VIS_NETWORK ? "vis-network" : "Cytoscape") + ".");
+                    + target + ".");
         }
         for (LegendEntry e : legendPreview) {
             TableItem item = new TableItem(legendPreviewTable, SWT.NONE);

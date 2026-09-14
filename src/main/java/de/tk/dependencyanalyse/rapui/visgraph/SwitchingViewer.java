@@ -181,12 +181,14 @@ public class SwitchingViewer extends Composite {
             setContextMenuProvider(currentContextMenuProvider);
         }
         // Re-apply the legend AFTER everything else so the panel sits on top
-        // of the freshly-applied data and styles.
+        // of the freshly-applied data and styles. Sigma is excluded from
+        // this path: its Color Palette is auto-managed by the bridge from
+        // the per-node color maps (applyNodeColors / setLeidenClusterColors)
+        // and does not respond to manual setLegend() pushes. NVL never had
+        // a legend API to begin with.
         if (legendEnabled) {
             if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
                 cytoscapeViewer.setLegend(currentLegend, true);
-            } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
-                sigmaViewer.setLegend(currentLegend, true);
             } else if (visViewer != null) {
                 visViewer.setLegend(currentLegend, true);
             }
@@ -445,18 +447,21 @@ public class SwitchingViewer extends Composite {
      * {@code enabled} controls visibility — when {@code false} the panel
      * hides but the entries are kept so toggling back on restores it.
      *
+     * <p>Sigma is excluded: its Color Palette is auto-managed by the bridge
+     * from the per-node color maps ({@link #applyNodeColors} /
+     * {@link #setLeidenClusterColors}). NVL never had a legend API. Calls
+     * for either of those engines are silently ignored.</p>
+     *
      * <p>The legend payload survives engine switches — after
      * {@link #switchTo(GraphEngine)} the panel is re-applied to the fresh
-     * engine automatically.</p>
+     * engine automatically (except Sigma / NVL, see above).</p>
      */
     public void setLegend(List<LegendEntry> entries, boolean enabled) {
         this.currentLegend = entries == null ? List.of() : List.copyOf(entries);
         this.legendEnabled = enabled;
         if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
             cytoscapeViewer.setLegend(currentLegend, enabled);
-        } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
-            sigmaViewer.setLegend(currentLegend, enabled);
-        } else if (visViewer != null) {
+        } else if (visViewer != null && currentEngine != GraphEngine.SIGMA) {
             visViewer.setLegend(currentLegend, enabled);
         }
     }
@@ -467,9 +472,7 @@ public class SwitchingViewer extends Composite {
         this.legendEnabled = false;
         if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
             cytoscapeViewer.clearLegend();
-        } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
-            sigmaViewer.clearLegend();
-        } else if (visViewer != null) {
+        } else if (visViewer != null && currentEngine != GraphEngine.SIGMA) {
             visViewer.clearLegend();
         }
     }

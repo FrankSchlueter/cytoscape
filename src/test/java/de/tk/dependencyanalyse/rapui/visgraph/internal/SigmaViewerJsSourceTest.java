@@ -362,4 +362,26 @@ class SigmaViewerJsSourceTest {
                         + "GraphRelationship.toGraphologyEdge) crashes the WebGL "
                         + "renderer with 'Cannot read properties of undefined'.");
     }
+
+    /**
+     * Color Palette regression guard. The panel is auto-managed by
+     * the Java bridge from {@code applyNodeColors} /
+     * {@code setLeidenClusterColors} — the JS side must expose
+     * {@code vg_applyColorPalette(entries, enabled)} +
+     * {@code vg_hideColorPalette()} and must NOT keep the legacy
+     * {@code vg_applyLegend} handler (which was driven by a separate
+     * manual {@code setLegend} API call).
+     */
+    @Test
+    void colorPaletteAutoManaged() throws Exception {
+        String src = readViewerJs();
+        assertTrue(src.contains("window.vg_applyColorPalette"),
+                "sigma-viewer.js must register window.vg_applyColorPalette (auto-pushed by bridge)");
+        assertTrue(src.contains("window.vg_hideColorPalette"),
+                "sigma-viewer.js must register window.vg_hideColorPalette (auto-pushed by clear())");
+        assertFalse(src.contains("window.vg_applyLegend"),
+                "sigma-viewer.js must NOT register window.vg_applyLegend — the "
+                        + "Color Palette replaces the manually-driven Legend API "
+                        + "for sigma and NVL");
+    }
 }

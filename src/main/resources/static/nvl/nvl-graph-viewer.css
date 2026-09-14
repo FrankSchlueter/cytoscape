@@ -73,3 +73,80 @@ html, body {
     margin-left: 12px;
     color: #888;
 }
+
+/* ----- Color palette (auto-managed by applyNodeColors / setLeidenClusterColors) ----- */
+
+#vgv-color-palette {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid #cccccc;
+    border-radius: 4px;
+    padding: 8px 10px;
+    font: 12px "Segoe UI", Arial, sans-serif;
+    z-index: 5000;
+    max-width: 240px;
+    max-height: 70vh;
+    overflow-y: auto;
+    box-shadow: 1px 2px 6px rgba(0, 0, 0, 0.15);
+    color: #222;
+}
+
+#vgv-color-palette .vgv-palette-header {
+    font-weight: 600;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #dddddd;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+#vgv-color-palette .vgv-palette-toggle {
+    cursor: pointer;
+    color: #888;
+    font-weight: normal;
+    padding: 0 4px;
+    user-select: none;
+}
+
+#vgv-color-palette .vgv-palette-toggle:hover {
+    color: #333;
+}
+
+#vgv-color-palette .vgv-palette-body {
+    display: block;
+}
+
+#vgv-color-palette.vgv-palette-collapsed .vgv-palette-body {
+    display: none;
+}
+
+#vgv-color-palette .vgv-palette-item {
+    display: flex;
+    align-items: center;
+    padding: 3px 4px;
+    border-radius: 3px;
+    user-select: none;
+}
+
+#vgv-color-palette .vgv-palette-swatch {
+    width: 14px;
+    height: 14px;
+    border: 1px solid #333;
+    border-radius: 2px;
+    margin-right: 6px;
+    flex-shrink: 0;
+}
+
+#vgv-color-palette .vgv-palette-label {
+    flex: 1;
+    word-break: break-word;
+}
+
+#vgv-color-palette .vgv-palette-count {
+    color: #777;
+    font-size: 11px;
+    margin-left: 6px;
+}

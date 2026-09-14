@@ -7,7 +7,6 @@ import de.tk.dependencyanalyse.rapui.visgraph.callback.SelectionClearedListener;
 import de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphData;
 import de.tk.dependencyanalyse.rapui.visgraph.data.LayoutAlgorithm;
-import de.tk.dependencyanalyse.rapui.visgraph.data.LegendEntry;
 import de.tk.dependencyanalyse.rapui.visgraph.engine.GraphEngine;
 import de.tk.dependencyanalyse.rapui.visgraph.internal.SigmaJsBridge;
 import org.eclipse.swt.SWT;
@@ -196,19 +195,13 @@ public class SigmaViewer extends Browser {
     /**
      * Push a per-node Leiden-cluster color map. Sigma renders the per-node
      * color via the {@code nodeReducer} (see {@code sigma-viewer.js}).
+     * The Color Palette panel is auto-managed by the bridge: a non-empty
+     * map makes it appear, an empty map hides it.
      */
     public void setLeidenClusterColors(Map<String, String> colors) {
         if (colors == null) return;
         this.currentLeidenColors = Map.copyOf(colors);
         runWhenReady(() -> bridge.setLeidenColors(colors));
-    }
-
-    public void setLegend(List<LegendEntry> entries, boolean enabled) {
-        runWhenReady(() -> bridge.applyLegend(entries, enabled));
-    }
-
-    public void clearLegend() {
-        runWhenReady(bridge::clearLegend);
     }
 
     /* ---- selection ---- */

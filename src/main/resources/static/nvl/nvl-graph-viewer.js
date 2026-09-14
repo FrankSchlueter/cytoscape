@@ -40,6 +40,15 @@
     var pendingData = null;
     var nvlReady = false;
 
+    // Color palette state — driven by applyNodeColors / setLeidenColors
+    // from the Java bridge. The panel is auto-shown when at least one
+    // non-empty color map is pushed, and auto-hidden by clear().
+    var currentLeidenColors = {};
+    var currentEffectiveColors = {};
+    var paletteEntries = [];
+    var paletteEnabled = false;
+    var paletteCollapsed = false;
+
     // Tooltip state
     var tooltipEl = null;
 
@@ -47,8 +56,8 @@
     var dragHandler = null;
     var clickHandler = null;
     var hoverHandler = null;
-    var panHandler = null;
-    var zoomHandler = null;
+    var panHandler;
+    var zoomHandler;
 
     function javaCall(name) {
         var fn = null;
@@ -205,15 +214,16 @@
                 updateTooltip(element, evt);
             });
 
-            // Pan/Zoom are deliberately NOT enabled by default. The
-            // embedded RAP iframe has its own scroll container and any
-            // wheel/pan gestures tend to either zoom into a useless
-            // spot or move the initial viewport away from the graph.
-            // Users can still navigate via the Fit button in the
-            // control bar; if a Java caller wants pan/zoom they can
-            // construct handlers themselves.
-            panHandler = null;
-            zoomHandler = null;
+            // Enable Pan (drag on empty canvas) and Zoom (mouse wheel).
+            // The official @neo4j-nvl/interaction-handlers attach their
+            // own event listeners to the container, perform their own
+            // hit-testing (so panning never starts on a node hit) and
+            // call nvl.setPan() / nvl.setZoomAndPan() themselves with
+            // NVL's built-in zoom limits enforced. The Zoom handler also
+            // calls preventDefault() on the wheel event so the gesture
+            // does not bubble up to the RAP scroll container.
+            panHandler = new window.Neo4jNVLInteractions.Pan(nvl, {});
+            zoomHandler = new window.Neo4jNVLInteractions.Zoom(nvl, {});
         } catch (e) {
             console.error('Interaction handler setup failed', e);
         }
@@ -639,8 +649,14 @@
      * every node receives a per-node {@code {id, color}} update via
      * {@code nvl.updateElementsInGraph} — symmetric to the
      * vis-network handler.
+     *
+     * <p>Side-effect: also drives the auto-managed Color Palette panel.
+     * The Java side pre-computes the palette entries and pushes them via
+     * {@code vgv_applyColorPalette} right after this call lands, so this
+     * handler only needs to cache the map for palette visibility tracking.</p>
      */
     window.vgv_applyLeidenColors = function (colors) {
+        currentLeidenColors = (colors && typeof colors === 'object') ? colors : {};
         updateNodeColors(colors);
     };
 
@@ -649,10 +665,93 @@
      * by {@code NodeColorResolver} (Java side). Pairs with
      * {@code NvlJsBridge.applyNodeColors} so the dialog's Tag-Colors
      * and Leiden-Colors buttons apply identically to all engines.
+     *
+     * <p>Side-effect: also drives the auto-managed Color Palette panel.
+     * The Java side pre-computes the palette entries and pushes them via
+     * {@code vgv_applyColorPalette} right after this call lands.</p>
      */
     window.vgv_applyNodeColors = function (effective) {
+        currentEffectiveColors = (effective && typeof effective === 'object') ? effective : {};
         updateNodeColors(effective);
     };
+
+    /**
+     * Render the Color Palette panel. Pairs with
+     * {@code NvlJsBridge.refreshPalette} which pushes one of these per
+     * non-empty color map push. {@code enabled} controls visibility —
+     * when false the panel hides but the entries are kept so toggling
+     * back on restores the prior state.
+     */
+    window.vgv_applyColorPalette = function (entries, enabled) {
+        var list = [];
+        if (Array.isArray(entries)) {
+            list = entries;
+        } else if (typeof entries === 'string') {
+            try { list = JSON.parse(entries) || []; } catch (e) { list = []; }
+        }
+        paletteEntries = list;
+        paletteEnabled = !!enabled && list.length > 0;
+        renderColorPalette();
+    };
+
+    /**
+     * Hide the Color Palette panel. Pairs with {@code clear()} on the
+     * Java side — clears the cached color maps and the panel state.
+     */
+    window.vgv_hideColorPalette = function () {
+        paletteEntries = [];
+        paletteEnabled = false;
+        renderColorPalette();
+    };
+
+    /**
+     * Rebuild the palette DOM. The panel sits top-right (CSS) and hides
+     * when {@code paletteEnabled} is false OR the entries list is empty.
+     */
+    function renderColorPalette() {
+        var panel = $('vgv-color-palette');
+        if (!panel) return;
+        var body = panel.querySelector('.vgv-palette-body');
+        if (!body) return;
+        if (!paletteEnabled || paletteEntries.length === 0) {
+            panel.style.display = 'none';
+            body.innerHTML = '';
+            return;
+        }
+        panel.style.display = 'block';
+        body.innerHTML = '';
+        paletteEntries.forEach(function (entry) {
+            if (!entry || !entry.colorHex) return;
+            var row = document.createElement('div');
+            row.className = 'vgv-palette-item';
+            var sw = document.createElement('span');
+            sw.className = 'vgv-palette-swatch';
+            sw.style.background = entry.colorHex;
+            row.appendChild(sw);
+            var lbl = document.createElement('span');
+            lbl.className = 'vgv-palette-label';
+            lbl.textContent = entry.label != null ? String(entry.label) : '';
+            row.appendChild(lbl);
+            if (typeof entry.count === 'number') {
+                var cnt = document.createElement('span');
+                cnt.className = 'vgv-palette-count';
+                cnt.textContent = String(entry.count);
+                row.appendChild(cnt);
+            }
+            body.appendChild(row);
+        });
+        panel.classList.toggle('vgv-palette-collapsed', paletteCollapsed);
+        var toggle = panel.querySelector('.vgv-palette-toggle');
+        if (toggle) {
+            toggle.innerHTML = paletteCollapsed ? '&#x2B;' : '&#x2212;';
+            toggle.title = paletteCollapsed ? 'Show palette' : 'Hide palette';
+            toggle.onclick = function (ev) {
+                ev.stopPropagation();
+                paletteCollapsed = !paletteCollapsed;
+                renderColorPalette();
+            };
+        }
+    }
 
     /**
      * Backwards-compat alias — the NodeConfig is no longer applied via

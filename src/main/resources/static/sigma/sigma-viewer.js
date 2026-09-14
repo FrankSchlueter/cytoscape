@@ -33,7 +33,8 @@
  *   <li>vg_setLayoutOptions                     (options)</li>
  *   <li>vg_applyNodeConfig                      (config)</li>
  *   <li>vg_applyLeidenColors                    (colorMap)</li>
- *   <li>vg_applyLegend                          (entries, enabled)</li>
+ *   <li>vg_applyColorPalette                    (entries, enabled) -- auto-pushed by bridge</li>
+ *   <li>vg_hideColorPalette                     () -- auto-pushed by clear()</li>
  *   <li>vg_clear                                ()</li>
  *   <li>vg_fitToScreen                          ()</li>
  *   <li>vg_resize                               ()</li>
@@ -1389,9 +1390,35 @@ function defaultSigmaSettings() {
         try { renderer.refresh(); } catch (e) {}
     };
 
-    window.vg_applyLegend = function (entries, enabled) {
+    /**
+     * Render the Color Palette panel. Pairs with
+     * {@code SigmaJsBridge.refreshPalette} which pushes one of these per
+     * non-empty color map push. {@code enabled} controls visibility —
+     * when false the panel hides but the entries are kept so toggling
+     * back on restores the prior state.
+     *
+     * <p>Replaces the legacy {@code vg_applyLegend} (manually-driven by
+     * {@code SwitchingViewer.setLegend}) — the panel is now auto-managed
+     * from {@code applyNodeColors} / {@code setLeidenClusterColors} on
+     * the Java side.</p>
+     */
+    window.vg_applyColorPalette = function (entries, enabled) {
         legendEntries = Array.isArray(entries) ? entries : [];
-        legendEnabled = !!enabled;
+        legendEnabled = !!enabled && legendEntries.length > 0;
+        if (!legendEnabled) {
+            activeLegendColor = null;
+        }
+        renderLegendPanel();
+    };
+
+    /**
+     * Hide the Color Palette panel. Pairs with {@code clear()} on the
+     * Java side — clears the cached color maps and the panel state.
+     */
+    window.vg_hideColorPalette = function () {
+        legendEntries = [];
+        legendEnabled = false;
+        activeLegendColor = null;
         renderLegendPanel();
     };
 

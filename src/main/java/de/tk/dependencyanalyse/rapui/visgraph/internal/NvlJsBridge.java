@@ -5,6 +5,8 @@ import de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphData;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphNode;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphRelationship;
+import de.tk.dependencyanalyse.rapui.visgraph.data.LegendBuilder;
+import de.tk.dependencyanalyse.rapui.visgraph.data.LegendEntry;
 import com.google.gson.Gson;
 import org.eclipse.swt.browser.Browser;
 
@@ -56,6 +58,13 @@ public final class NvlJsBridge {
     private volatile ContextMenuSnapshot pendingContextMenu;
     private final AtomicReference<Object> lastContextTarget = new AtomicReference<>();
 
+    /** Last Leiden cluster color map pushed via {@link #setLeidenColors}. */
+    private volatile Map<String, String> currentLeidenColors = Map.of();
+    /** Last effective color map pushed via {@link #applyNodeColors}. */
+    private volatile Map<String, String> currentEffectiveColors = Map.of();
+    /** True when the palette panel should be visible. */
+    private volatile boolean paletteVisible = false;
+
     public NvlJsBridge(Browser browser) {
         this.browser = browser;
         this.scriptQueue = new BrowserScriptQueue(browser);
@@ -89,6 +98,12 @@ public final class NvlJsBridge {
         exec("window.__nvl_nodes = " + gson.toJson(payload.get("nodes")) + ";");
         exec("window.__nvl_relationships = " + gson.toJson(payload.get("relationships")) + ";");
         exec("window.vgv_setData();");
+        // Re-derive the palette against the freshly-loaded node set so
+        // the per-color node counts reflect the new data. The cached
+        // currentEffectiveColors / currentLeidenColors survive a
+        // setGraphData(...) call so the palette reappears automatically
+        // when the same color source still applies.
+        refreshPalette();
     }
 
     public void applyNodeConfig(NodeConfig config) {
@@ -97,6 +112,58 @@ public final class NvlJsBridge {
         if (currentData != null) {
             applyData(currentData);
         }
+    }
+
+    /**
+     * Re-derive the color-palette entries from the cached color maps
+     * and push the resulting panel state to the iframe.
+     *
+     * <p>Visibility is driven by the most recent non-empty push:</p>
+     * <ul>
+     *   <li>{@link #applyNodeColors} with a non-empty map → palette
+     *       shown with entries from {@link LegendBuilder#combined};</li>
+     *   <li>{@link #setLeidenColors} with a non-empty map → palette
+     *       shown with entries from {@link LegendBuilder#fromLeidenClusters};</li>
+     *   <li>both maps empty → palette hidden.</li>
+     * </ul>
+     *
+     * <p>The panel does NOT survive a {@link #clear()} call — that path
+     * resets both cached maps and pushes {@code vgv_hideColorPalette}.</p>
+     */
+    private void refreshPalette() {
+        Map<String, String> effective = currentEffectiveColors;
+        Map<String, String> leiden = currentLeidenColors;
+        boolean anyColors = !effective.isEmpty() || !leiden.isEmpty();
+        if (!anyColors) {
+            if (paletteVisible) {
+                paletteVisible = false;
+                exec("window.vgv_hideColorPalette();");
+            }
+            return;
+        }
+        List<LegendEntry> entries = derivePaletteEntries(effective, leiden);
+        paletteVisible = true;
+        exec("window.vgv_applyColorPalette(" + gson.toJson(entries) + ", true);");
+    }
+
+    /**
+     * Pick the highest-signal LegendBuilder source for the current
+     * color maps. {@link LegendBuilder#combined} already merges all
+     * three sources (Tag → Cluster → NodeType) and dedups by hex, so
+     * passing both maps there yields the richest labels. When the
+     * effective map is empty we fall back to the pure Leiden builder
+     * (still produces "Cluster N" labels) and finally to a generic
+     * "Color N" derivation in the iframe for the no-config case.
+     */
+    private List<LegendEntry> derivePaletteEntries(Map<String, String> effective,
+                                                     Map<String, String> leiden) {
+        if (!effective.isEmpty()) {
+            return LegendBuilder.combined(currentData, currentNodeConfig, leiden);
+        }
+        if (!leiden.isEmpty()) {
+            return LegendBuilder.fromLeidenClusters(currentData, leiden);
+        }
+        return List.of();
     }
 
     /**
@@ -111,9 +178,19 @@ public final class NvlJsBridge {
      * {@code {id, color}} entry per matched node — symmetric to the
      * {@code vgv_applyLeidenColors} handler in
      * {@code vis-graph-viewer.js}.</p>
+     *
+     * <p>Also drives the auto-managed Color Palette: a non-empty map
+     * makes the palette panel appear (entries derived via
+     * {@link LegendBuilder#fromLeidenClusters}); an empty map hides the
+     * palette. The palette's lifecycle is tied to the most recent
+     * non-empty color push so successive {@code setLeidenColors(empty)}
+     * calls clean up state.</p>
      */
     public void setLeidenColors(Map<String, String> colors) {
-        exec("window.vgv_applyLeidenColors(" + gson.toJson(colors == null ? Map.of() : colors) + ");");
+        Map<String, String> effective = colors == null ? Map.of() : colors;
+        this.currentLeidenColors = effective;
+        exec("window.vgv_applyLeidenColors(" + gson.toJson(effective) + ");");
+        refreshPalette();
     }
 
     /**
@@ -128,13 +205,28 @@ public final class NvlJsBridge {
      * {@code {id, color}} entry per node — identical wire shape to
      * {@link #setLeidenColors} but driven by the resolver instead of
      * the Leiden map alone.</p>
+     *
+     * <p>Also drives the auto-managed Color Palette: a non-empty map
+     * makes the palette panel appear (entries derived via
+     * {@link LegendBuilder#combined}); an empty map hides the palette.</p>
      */
     public void applyNodeColors(Map<String, String> effective) {
-        exec("window.vgv_applyNodeColors(" + gson.toJson(effective == null ? Map.of() : effective) + ");");
+        Map<String, String> safe = effective == null ? Map.of() : effective;
+        this.currentEffectiveColors = safe;
+        exec("window.vgv_applyNodeColors(" + gson.toJson(safe) + ");");
+        refreshPalette();
     }
 
     public void clear() {
+        // Drop cached color state so the auto-managed palette does not
+        // resurrect after a clear(). Without this the next data load
+        // would briefly show the previous palette until the next
+        // applyNodeColors call lands.
+        this.currentLeidenColors = Map.of();
+        this.currentEffectiveColors = Map.of();
+        this.paletteVisible = false;
         exec("window.vgv_clear();");
+        exec("window.vgv_hideColorPalette();");
     }
 
     public void fitToScreen() {
