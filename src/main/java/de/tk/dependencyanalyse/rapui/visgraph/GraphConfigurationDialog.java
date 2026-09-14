@@ -514,6 +514,7 @@ public class GraphConfigurationDialog extends Dialog {
         nodeTypeMode = allNodesHaveNodeType
                 ? NodeTypeMode.SVG_ICON
                 : NodeTypeMode.SHAPE;
+        nodeTypeMode = NodeTypeMode.SHAPE;
         nodeTypeShapeMap.clear();
         nodeTypeColorMap.clear();
         NodeConfig existing = (viewer != null) ? viewer.getNodeConfig() : null;
@@ -899,6 +900,9 @@ public class GraphConfigurationDialog extends Dialog {
                 // SVG_ICON: no NodeConfig colors / shapes — the per-node
                 // SVG-icon badge (with Leiden-driven fill) is written
                 // directly on each GraphNode by applySvgIconRendering().
+                for (Map.Entry<String, String> e : nodeTypeColorMap.entrySet()) {
+                    b.labelColor(e.getKey(), e.getValue());
+                }
                 applySvgIconRendering();
             }
         }
