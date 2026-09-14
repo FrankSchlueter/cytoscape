@@ -37,42 +37,45 @@ package de.tk.dependencyanalyse.rapui.visgraph.data;
  * shows only the layouts it actually understands.</p>
  */
 public enum LayoutAlgorithm {
-    FORCE_ATLAS_2D  (true,  false, false),
-    BARNES_HUT      (true,  false, false),
-    REPULSION       (true,  false, false),
-    HIERARCHICAL_REPULSION(true, false, false),
-    HIERARCHICAL    (true,  false, false),
-    GRID            (false, true,  false),
-    CIRCULAR        (false, true,  false),
-    CONCENTRIC      (false, true,  false),
-    COSE            (false, true,  false),
-    //COSE_BILKENT    (false, true,  false),
-    FCOSE           (false, true,  false),
-    // DAGRE           (false, true,  false),
-    BREADTHFIRST    (false, true,  false),
-    //COLA            (false, true,  false),
-    NULL            (false, true,  false),
-    NONE            (true,  true,  false),
-    LEIDEN_GRID     (false, true,  false),
-    FORCE_ATLAS_SIGMA         (false, false, true),
-    FORCE_DIRECTED_2_SIGMA    (false, false, true),
-    NOVERLAP_SIGMA            (false, false, true),
-    CIRCULAR_SIGMA            (false, false, true),
-    RANDOM_SIGMA              (false, false, true);
+    FORCE_ATLAS_2D  (true,  false, false, true),
+    BARNES_HUT      (true,  false, false, true),
+    REPULSION       (true,  false, false, true),
+    HIERARCHICAL_REPULSION(true, false, false, true),
+    HIERARCHICAL    (true,  false, false, true),
+    GRID            (false, true,  false, true),
+    CIRCULAR        (false, true,  false, true),
+    CONCENTRIC      (false, true,  false, false),
+    COSE            (false, true,  false, false),
+    //COSE_BILKENT    (false, true,  false, false),
+    FCOSE           (false, true,  false, false),
+    // DAGRE           (false, true,  false, false),
+    BREADTHFIRST    (false, true,  false, false),
+    //COLA            (false, true,  false, false),
+    NULL            (false, true,  false, false),
+    NONE            (true,  true,  false, true),
+    LEIDEN_GRID     (false, true,  false, false),
+    FORCE_ATLAS_SIGMA         (false, false, true, false),
+    FORCE_DIRECTED_2_SIGMA    (false, false, true, false),
+    NOVERLAP_SIGMA            (false, false, true, false),
+    CIRCULAR_SIGMA            (false, false, true, false),
+    RANDOM_SIGMA              (false, false, true, false);
 
     private final boolean supportedByVisNetwork;
     private final boolean supportedByCytoscape;
     private final boolean supportedBySigma;
+    private final boolean supportedByNvl;
 
-    LayoutAlgorithm(boolean supportedByVisNetwork, boolean supportedByCytoscape, boolean supportedBySigma) {
+    LayoutAlgorithm(boolean supportedByVisNetwork, boolean supportedByCytoscape, boolean supportedBySigma, boolean supportedByNvl) {
         this.supportedByVisNetwork = supportedByVisNetwork;
         this.supportedByCytoscape = supportedByCytoscape;
         this.supportedBySigma = supportedBySigma;
+        this.supportedByNvl = supportedByNvl;
     }
 
     public boolean isSupportedByVisNetwork() { return supportedByVisNetwork; }
     public boolean isSupportedByCytoscape() { return supportedByCytoscape; }
     public boolean isSupportedBySigma() { return supportedBySigma; }
+    public boolean isSupportedByNvl() { return supportedByNvl; }
 
     /**
      * Returns the subset of values the given engine supports, preserving
@@ -88,6 +91,10 @@ public enum LayoutAlgorithm {
 
     public static LayoutAlgorithm[] valuesForSigma() {
         return filterByFlag(la -> la.supportedBySigma);
+    }
+
+    public static LayoutAlgorithm[] valuesForNvl() {
+        return filterByFlag(la -> la.supportedByNvl);
     }
 
     private static LayoutAlgorithm[] filterByFlag(java.util.function.Predicate<LayoutAlgorithm> test) {

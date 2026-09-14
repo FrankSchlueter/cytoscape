@@ -58,6 +58,15 @@
     var pendingLayoutOptions = null;
     var currentNodeConfig = { showTitle: true, labelColors: {}, labelShapes: {}, tagColors: {}, globalTagColors: {} };
     var currentLeidenColors = {};
+    /**
+     * Engine-agnostic effective per-node color map pushed by the Java
+     * {@code NodeColorResolver} via {@code vg_applyNodeColors}. Takes
+     * precedence over both {@code currentNodeConfig} (label/tag colors)
+     * and {@code currentLeidenColors} in {@code buildNodeReducer} so the
+     * "Apply Leiden / Apply Tag Colors" buttons apply identically to
+     * the dialog vs. the resolver path. Empty / null = no override.
+     */
+    var currentEffectiveColors = {};
     var cachedNodesEtag = null;
     var cachedEdgesEtag = null;
     var cachedNodesBody = null;
@@ -1335,15 +1344,35 @@ function defaultSigmaSettings() {
         try { renderer.refresh(); } catch (e) {}
     };
 
+    /**
+     * Push the engine-agnostic "effective per-node color" map produced
+     * by {@code NodeColorResolver} (Java side). Pairs with
+     * {@code SigmaJsBridge.applyNodeColors} so the dialog's Tag-Colors
+     * and Leiden-Colors buttons apply identically to all engines.
+     *
+     * <p>The map takes precedence over both {@code currentNodeConfig}
+     * (label/tag colors) and {@code currentLeidenColors} in
+     * {@code buildNodeReducer} — same precedence as the resolver — so
+     * a click on "Apply Tag Colors" lands on the canvas immediately.</p>
+     */
+    window.vg_applyNodeColors = function (effective) {
+        currentEffectiveColors = (effective && typeof effective === 'object') ? effective : {};
+        if (!renderer) return;
+        renderer.setSetting('nodeReducer', buildNodeReducer(currentNodeConfig));
+        try { renderer.refresh(); } catch (e) {}
+    };
+
     function buildNodeReducer(config) {
         var showTitle = config.showTitle !== false;
         var labelColors = config.labelColors || {};
         var tagColors = config.tagColors || {};
         var globalTagColors = config.globalTagColors || {};
         var leidenColors = currentLeidenColors || {};
+        var effectiveColors = currentEffectiveColors || {};
         return function (node, data) {
             var id = data.id || node;
-            var color = leidenColors[id]
+            var color = effectiveColors[id]
+                    || leidenColors[id]
                     || (data && data.color)
                     || (labelColors[data.nodeType] || null);
             var attrs = Object.assign({}, data);
@@ -1416,9 +1445,14 @@ function defaultSigmaSettings() {
         } else {
             renderer.setSetting('nodeReducer', function (node, data) {
                 var id = data.id || node;
-                var match = currentLeidenColors[id] && currentLeidenColors[id].toLowerCase() === color.toLowerCase();
+                // Match against effective colors first, then fall back
+                // to Leiden colors so the legend highlight stays in
+                // sync with whatever the user is currently looking at.
+                var nodeColor = (currentEffectiveColors && currentEffectiveColors[id])
+                        || (currentLeidenColors && currentLeidenColors[id]);
+                var match = nodeColor && nodeColor.toLowerCase() === color.toLowerCase();
                 var attrs = Object.assign({}, data);
-                attrs.color = match ? (currentLeidenColors[id] || '#4A90E2') : '#cccccc';
+                attrs.color = match ? (nodeColor || '#4A90E2') : '#cccccc';
                 attrs.opacity = match ? 1 : 0.25;
                 if (!currentNodeConfig.showTitle) attrs.label = '';
                 return attrs;

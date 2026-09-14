@@ -5,31 +5,30 @@ import de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphData;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphNode;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphRelationship;
-import de.tk.dependencyanalyse.rapui.visgraph.data.LegendEntry;
 import com.google.gson.Gson;
 import org.eclipse.swt.browser.Browser;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Manages all BrowserFunction handlers that the vis-graph-viewer registers
- * with the embedded {@link Browser}.
+ * Manages all BrowserFunction handlers and queued script execution for the
+ * NVL-bridge (`nvl-graph-viewer.js`).
  *
- * Each registered function is held by {@link BrowserFunctions} so it can be
- * deregistered in {@link #dispose()}. All scripts are submitted through
- * {@link BrowserScriptQueue} so RAP's "only one script in flight" rule
- * cannot be violated.
+ * <p>Mirror image of {@link VisJsBridge} — same surface area, but
+ * speaks NVL on the wire instead of vis-network. The two bridges share
+ * {@link BrowserScriptQueue} and {@link BrowserFunctions} so script
+ * serialization and BrowserFunction lifecycle code is not duplicated.</p>
  */
-public final class VisJsBridge {
+public final class NvlJsBridge {
 
-    private static final Logger LOG = Logger.getLogger(VisJsBridge.class.getName());
+    private static final Logger LOG = Logger.getLogger(NvlJsBridge.class.getName());
 
     private static final String FN_VIEWER_READY = "vgv_viewerReady";
     private static final String FN_NODE_SELECTED = "vgv_notifyNodeSelected";
@@ -55,10 +54,9 @@ public final class VisJsBridge {
     private volatile GraphData currentData;
     private volatile NodeConfig currentNodeConfig;
     private volatile ContextMenuSnapshot pendingContextMenu;
-    private final java.util.concurrent.atomic.AtomicReference<Object> lastContextTarget =
-            new java.util.concurrent.atomic.AtomicReference<>();
+    private final AtomicReference<Object> lastContextTarget = new AtomicReference<>();
 
-    public VisJsBridge(Browser browser) {
+    public NvlJsBridge(Browser browser) {
         this.browser = browser;
         this.scriptQueue = new BrowserScriptQueue(browser);
         this.functions = new BrowserFunctions(browser);
@@ -82,76 +80,54 @@ public final class VisJsBridge {
     public void addContextActionHandler(ContextActionHandler h) { contextActionHandlers.add(h); }
 
     public void setCurrentData(GraphData data) { this.currentData = data; }
-
     public void setCurrentNodeConfig(NodeConfig config) { this.currentNodeConfig = config; }
-
     public NodeConfig getCurrentNodeConfig() { return currentNodeConfig; }
-
-    /**
-     * Push a per-node Leiden-cluster color map to the iframe. vis-network
-     * has no stylesheet engine, so each node must receive its own
-     * {@code color} update via {@code nodes.update}. The payload format
-     * mirrors the Cytoscape side ({@code {id → hex}}) — the JS handler
-     * applies it uniformly to every node present in {@code network.body.nodes}.
-     */
-    public void setLeidenClusterColors(Map<String, String> colors) {
-        exec("window.vgv_applyLeidenColors(" + gson.toJson(colors) + ");");
-    }
-
-    /**
-     * Push a legend payload to the iframe. {@code entries} is rendered as
-     * the optional click-to-highlight panel positioned top-right in the
-     * vis-network canvas. {@code enabled} controls panel visibility.
-     */
-    public void applyLegend(List<LegendEntry> entries, boolean enabled) {
-        exec("window.vgv_applyLegend("
-                + gson.toJson(entries == null ? List.of() : entries)
-                + ", " + (enabled ? "true" : "false") + ");");
-    }
-
-    /** Remove the legend panel from the iframe. */
-    public void clearLegend() {
-        exec("window.vgv_applyLegend([], false);");
-    }
 
     public void applyData(GraphData data) {
         this.currentData = data;
-        Map<String, Object> payload = data.toVisNetworkData(currentNodeConfig);
-        exec("window.__vgv_nodes = " + gson.toJson(payload.get("nodes")) + ";");
-        exec("window.__vgv_edges = " + gson.toJson(payload.get("edges")) + ";");
+        Map<String, Object> payload = data.toNvlData();
+        exec("window.__nvl_nodes = " + gson.toJson(payload.get("nodes")) + ";");
+        exec("window.__nvl_relationships = " + gson.toJson(payload.get("relationships")) + ";");
         exec("window.vgv_setData();");
     }
 
     public void applyNodeConfig(NodeConfig config) {
         this.currentNodeConfig = config;
+        exec("window.vgv_applyNodeConfig(" + gson.toJson(toJsonNodeConfig(config)) + ");");
         if (currentData != null) {
-            // Re-render SVG badges with the new colors and push the
-            // updated image URIs / color.background updates to the iframe.
-            // vis-network has no stylesheet engine like Cytoscape, so the
-            // effective color must be applied per-node — see
-            // SvgBadgeColorUpdater.applyRecolorsBoth.
-            List<Map<String, Object>> recolors =
-                    SvgBadgeColorUpdater.applyRecolorsBoth(currentData, config);
-            if (!recolors.isEmpty()) {
-                LOG.info("VisJsBridge.applyNodeConfig: "
-                        + recolors.size() + " nodes re-rendered with new colors");
-                exec("window.vgv_applyNodeImages("
-                        + gson.toJson(recolors) + ");");
-            }
+            applyData(currentData);
         }
     }
 
     /**
-     * Push the engine-agnostic per-node effective color map produced by
-     * {@link NodeColorResolver#resolveEffectiveColors} to the iframe.
+     * Push a per-node Leiden cluster color map to the iframe. Pairs with
+     * {@code GraphConfigurationDialog}'s "Apply Leiden Clustering" button
+     * and {@link SwitchingViewer#setLeidenClusterColors} (which now
+     * forwards to NVL when the active engine is {@code NEO4J_NVL}).
      *
-     * <p>The JS handler {@code vgv_applyNodeColors} (in
-     * {@code vis-graph-viewer.js}) iterates the map and emits a
-     * {@code nodes.update} call with one
-     * {@code {id, color: {background, border, highlight, hover}}}
-     * entry per matched node. A trailing {@code network.redraw()}
-     * forces the recolor to be visible immediately, mirroring the
-     * behaviour of {@code vgv_applyLeidenColors}.</p>
+     * <p>The JS handler {@code vgv_applyLeidenColors} (in
+     * {@code nvl-graph-viewer.js}) iterates the map and emits an
+     * {@code nvl.updateElementsInGraph} call with one
+     * {@code {id, color}} entry per matched node — symmetric to the
+     * {@code vgv_applyLeidenColors} handler in
+     * {@code vis-graph-viewer.js}.</p>
+     */
+    public void setLeidenColors(Map<String, String> colors) {
+        exec("window.vgv_applyLeidenColors(" + gson.toJson(colors == null ? Map.of() : colors) + ");");
+    }
+
+    /**
+     * Push the engine-agnostic "effective per-node color map" produced
+     * by {@link NodeColorResolver#resolveEffectiveColors} to the NVL
+     * iframe. Used by the unified {@link SwitchingViewer#applyNodeColors}
+     * method so the dialog's Tag-Colors and Leiden-Colors buttons apply
+     * to NVL too (previously a no-op).
+     *
+     * <p>The JS handler {@code vgv_applyNodeColors} walks the map and
+     * calls {@code nvl.updateElementsInGraph} with one
+     * {@code {id, color}} entry per node — identical wire shape to
+     * {@link #setLeidenColors} but driven by the resolver instead of
+     * the Leiden map alone.</p>
      */
     public void applyNodeColors(Map<String, String> effective) {
         exec("window.vgv_applyNodeColors(" + gson.toJson(effective == null ? Map.of() : effective) + ");");
@@ -165,34 +141,8 @@ public final class VisJsBridge {
         exec("window.vgv_fitToScreen();");
     }
 
-    /**
-     * Ask the vis-network iframe to resize itself to the current
-     * container size and re-draw. Called from {@link GraphViewer}'s
-     * Resize-Listener so the canvas follows the composite's actual
-     * size (vis-network does not auto-detect zero-size parents).
-     */
-    public void resize() {
-        exec("if (window.vgv_resize) { window.vgv_resize(); }");
-    }
-
     public void setLayout(String algorithm) {
         exec("window.vgv_setLayout('" + algorithm + "');");
-    }
-
-    /**
-     * Push a JSON-friendly layout-option map to the iframe. Consumed by
-     * {@code window.vgv_setLayoutOptions} in {@code vis-graph-viewer.js}.
-     *
-     * <p>The map shape mirrors the Cytoscape counterpart and is produced
-     * by {@link de.tk.dependencyanalyse.rapui.visgraph.ForceAtlasOptions}:
-     * top-level {@code physics} (with {@code forceAtlas2Based} block),
-     * {@code edgeLengths} ({@code edgeId → length}), {@code clusterCentroids}
-     * ({@code nodeId → {x, y}}), {@code prefilterMinLogWeight} and a
-     * {@code meta} block for the status display.</p>
-     */
-    public void setLayoutOptions(Map<String, Object> options) {
-        if (options == null) return;
-        exec("window.vgv_setLayoutOptions(" + gson.toJson(options) + ");");
     }
 
     public void setPhysics(boolean enabled) {
@@ -200,6 +150,10 @@ public final class VisJsBridge {
     }
 
     public void setPhysicsSolver(String solver) {
+        // NVL has no exact solver concept; the bridge maps to the closest
+        // layout. Logged for visibility — callers should not rely on this
+        // being a strict 1:1.
+        LOG.fine("setPhysicsSolver: " + solver + " (NVL maps to best-effort layout)");
         exec("window.vgv_setPhysicsSolver('" + solver + "');");
     }
 
@@ -208,14 +162,17 @@ public final class VisJsBridge {
     }
 
     public void setHierarchicalSpacing(int levelSep, int nodeSpacing) {
+        // NVL does not expose spacing parameters in its public API.
         exec("window.vgv_setHierarchicalSpacing(" + levelSep + ", " + nodeSpacing + ");");
     }
 
     public void setStabilizationIterations(int iterations) {
+        // No-op equivalent in NVL; the bridge ignores this.
         exec("window.vgv_setStabilizationIterations(" + iterations + ");");
     }
 
     public void setAutoFitOnStabilization(boolean enabled) {
+        // No-op equivalent in NVL.
         exec("window.vgv_setAutoFitOnStabilization(" + enabled + ");");
     }
 
@@ -223,17 +180,9 @@ public final class VisJsBridge {
         exec("window.vgv_setOption('" + key + "', " + gson.toJson(value) + ");");
     }
 
-    /**
-     * Push a NodeConfig to the iframe WITHOUT triggering a re-apply. Used by
-     * unit tests and the GraphViewer when the current data is not yet set.
-     *
-     * <p>vis-network's viewer has no stylesheet engine — the config is
-     * only used by the Cytoscape bridge. The method is kept for
-     * backwards compatibility with callers that explicitly want to store
-     * the config without applying it.</p>
-     */
     public void pushNodeConfig(NodeConfig config) {
         this.currentNodeConfig = config;
+        exec("window.vgv_applyNodeConfig(" + gson.toJson(toJsonNodeConfig(config)) + ");");
     }
 
     public void showContextMenu(List<ContextMenuEntry> entries, int x, int y) {
@@ -260,27 +209,12 @@ public final class VisJsBridge {
         scriptQueue.dispose();
     }
 
-    /**
-     * Clean up vis-network-side artefacts (legend highlight, tooltip
-     * containers) before the Browser is disposed. Symmetric counterpart
-     * to {@link CytoscapeJsBridge#disposeIframe()} — without this hook
-     * the orphan {@code #vgv-legend} / {@code #vgv-context-menu} divs
-     * would float on top of an empty iframe after an engine switch.
-     */
-    public void disposeIframe() {
-        exec("try { if (window.vgv_dispose) { window.vgv_dispose(); } } catch(e){}");
-    }
-
     /* ---- private ---- */
 
     private void exec(String script) {
         scriptQueue.exec(script);
     }
 
-    /**
-     * Convert a {@link NodeConfig} into a JSON-friendly map shape for the
-     * JS bridge. {@code null} yields an empty config object.
-     */
     private static Map<String, Object> toJsonNodeConfig(NodeConfig cfg) {
         Map<String, Object> out = new LinkedHashMap<>();
         if (cfg == null) {
@@ -301,10 +235,6 @@ public final class VisJsBridge {
             tags.put(label, inner);
         });
         out.put("tagColors", tags);
-        // vis-network uses setNodeConfig / redraw via Cytoscape's NodeConfig
-        // generator; we forward globalTagColors for parity even though
-        // vis-network style updates are handled by Cytoscape-style config
-        // from the JS viewer's two bridges.
         Map<String, Object> globals = new LinkedHashMap<>();
         cfg.getGlobalTagColors().forEach((prop, byValue) ->
                 globals.put(prop, new LinkedHashMap<>(byValue)));
@@ -314,8 +244,7 @@ public final class VisJsBridge {
 
     private void registerAll() {
         functions.create(FN_VIEWER_READY, args -> {
-            java.util.logging.Logger.getLogger(VisJsBridge.class.getName())
-                    .info("VisJsBridge: vgv_viewerReady received from iframe");
+            LOG.info("NvlJsBridge: vgv_viewerReady received from iframe");
             viewerReady = true;
             for (Runnable r : onReadyCallbacks) {
                 try { r.run(); } catch (Exception e) {
@@ -388,7 +317,7 @@ public final class VisJsBridge {
                         }
                     } catch (Exception e) {
                         LOG.log(Level.WARNING, "contextHandler failed", e);
-                    }
+                        }
                 }
             });
             return null;

@@ -27,3 +27,4 @@ public class Application {
         System.out.println("Server started at http://localhost:8085/api/sample-graph");
     }
 }
+

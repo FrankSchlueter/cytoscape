@@ -1,6 +1,7 @@
 package de.tk.dependencyanalyse.rapui.visgraph.data;
 
 import de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig;
+import de.tk.dependencyanalyse.rapui.visgraph.internal.SvgBadgeColorUpdater;
 
 import java.io.IOException;
 import java.io.InputStream;

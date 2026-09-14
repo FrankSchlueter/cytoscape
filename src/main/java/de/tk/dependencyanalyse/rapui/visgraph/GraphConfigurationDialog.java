@@ -922,6 +922,15 @@ public class GraphConfigurationDialog extends Dialog {
 
         viewer.setNodeConfig(b.build());
 
+        // Push the unified per-node effective color map so every engine
+        // (Cytoscape, vis-network, sigma, NVL) reflects the same
+        // colors. NVL has no stylesheet engine and used to silently
+        // drop tag-color updates on its way through setNodeConfig;
+        // SwitchingViewer.applyNodeColors routes through
+        // NodeColorResolver → viewer.applyNodeColors(...) so the
+        // engines stay in lock-step.
+        viewer.applyNodeColors(b.build(), viewer.getLeidenClusterColors());
+
         // Tag / NodeType colors changed — refresh and re-push the legend so
         // the panel reflects the latest color mapping without requiring a
         // separate "Apply to Viewer" click.

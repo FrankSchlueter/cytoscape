@@ -1,0 +1,4 @@
+Neo4j, Inc. 
+License Agreement for Neo4j Visualization Library™
+
+The Neo4j Visualization Library (“NVL” or “NVL Software”) may only be used with (i) the Aura software as a service offering that is subject to the Neo4j Aura Terms of Service (“Cloud Agreement”) or (ii) the proprietary commercial graph database products developed by Neo4j and made available to its customers for download through the Neo4j web site that is subject to the Neo4j Subscription Agreement (“Software Agreement”). NVL is “Client Software” as defined in the Cloud Agreement or “Software” as defined in the Software Agreement.

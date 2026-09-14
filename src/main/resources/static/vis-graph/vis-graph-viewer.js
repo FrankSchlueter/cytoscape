@@ -332,6 +332,38 @@
         try { network.redraw(); } catch (e) { /* ignore */ }
     };
 
+    /**
+     * Apply the engine-agnostic "effective per-node color" map produced
+     * by {@code NodeColorResolver} (Java side). Pairs with
+     * {@code VisJsBridge.applyNodeColors} so the dialog's Tag-Colors and
+     * Leiden-Colors buttons apply identically to all engines.
+     *
+     * <p>Identical wire shape to {@code vgv_applyLeidenColors} — the
+     * two are kept as separate functions so a future caller that only
+     * wants Leiden recolor can subscribe to {@code vgv_applyLeidenColors}
+     * without forcing a full effective-color recompute.</p>
+     */
+    window.vgv_applyNodeColors = function (effective) {
+        if (!networkReady || !effective) return;
+        var updates = [];
+        Object.keys(effective).forEach(function (nodeId) {
+            var color = effective[nodeId];
+            if (!color) return;
+            updates.push({
+                id: nodeId,
+                color: {
+                    background: color,
+                    border: color,
+                    highlight: { background: color, border: color },
+                    hover: { background: color, border: color }
+                }
+            });
+        });
+        if (updates.length === 0) return;
+        nodes.update(updates);
+        try { network.redraw(); } catch (e) { /* ignore */ }
+    };
+
     /* ----- API: SVG node images ----- */
 
     /**

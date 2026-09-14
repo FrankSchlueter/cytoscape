@@ -2313,6 +2313,43 @@
         }
     };
 
+    /**
+     * Apply the engine-agnostic "effective per-node color" map produced
+     * by {@code NodeColorResolver} (Java side). Pairs with
+     * {@code CytoscapeJsBridge.applyNodeColors} so the dialog's
+     * Tag-Colors and Leiden-Colors buttons apply identically to all
+     * engines.
+     *
+     * <p>Identical wire shape to {@code cgv_applyLeidenColors}: emits
+     * one {@code node[id = "X"] { background-color: ... }} selector per
+     * entry, then re-attaches {@code clusterStyleRules()} +
+     * {@code communityStyleRules()} + {@code imageNodeStyle()} so the
+     * cluster dashed border and the SVG-badge sprite win on top of
+     * the per-node fill (matching the precedence documented in
+     * {@code cgv_applyNodeConfig}).</p>
+     */
+    window.cgv_applyNodeColors = function (effective) {
+        if (!cyReady || !cy || !effective) return;
+        var styles = [];
+        Object.keys(effective).forEach(function (nodeId) {
+            var color = effective[nodeId];
+            if (!color) return;
+            styles.push({
+                selector: 'node[id = "' + nodeId + '"]',
+                style: { 'background-color': color }
+            });
+        });
+        if (styles.length === 0) return;
+        var defaults = defaultStyle();
+        var merged = defaults.concat(styles).concat(clusterStyleRules());
+        if (communityViewState && communityViewState !== 'normal') {
+            merged = merged.concat(communityStyleRules());
+        }
+        merged.push(imageNodeStyle());
+        cy.style().fromJson(merged).update();
+        preloadSvgImagesAndRedraw();
+    };
+
     window.cgv_clear = function () {
         if (cyReady && cy) {
             cy.elements().remove();

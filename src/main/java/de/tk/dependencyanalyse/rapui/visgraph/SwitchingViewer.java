@@ -9,6 +9,7 @@ import de.tk.dependencyanalyse.rapui.visgraph.data.GraphData;
 import de.tk.dependencyanalyse.rapui.visgraph.data.LayoutAlgorithm;
 import de.tk.dependencyanalyse.rapui.visgraph.data.LegendEntry;
 import de.tk.dependencyanalyse.rapui.visgraph.engine.GraphEngine;
+import de.tk.dependencyanalyse.rapui.visgraph.internal.NodeColorResolver;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Event;
@@ -57,6 +58,7 @@ public class SwitchingViewer extends Composite {
     private GraphViewer visViewer;
     private CytoscapeViewer cytoscapeViewer;
     private SigmaViewer sigmaViewer;
+    private Neo4jNvlViewer nvlViewer;
 
     private final java.util.List<NodeSelectionListener> nodeListeners = new CopyOnWriteArrayList<>();
     private final java.util.List<RelationshipSelectionListener> relListeners = new CopyOnWriteArrayList<>();
@@ -138,6 +140,30 @@ public class SwitchingViewer extends Composite {
             if (!currentLeidenColors.isEmpty()) {
                 sigmaViewer.setLeidenClusterColors(currentLeidenColors);
             }
+        } else if (engine == GraphEngine.NEO4J_NVL) {
+            nvlViewer = new Neo4jNvlViewer(this, SWT.NONE);
+            wireViewer(nvlViewer);
+            if (currentData != null) nvlViewer.setGraphData(currentData);
+            if (currentNodeConfig != null) nvlViewer.setNodeConfig(currentNodeConfig);
+            if (currentLayout.isSupportedByNvl()) {
+                nvlViewer.setLayout(currentLayout);
+            } else {
+                // Previous engine's layout isn't supported by NVL —
+                // fall back to the NVL-friendly default.
+                nvlViewer.setLayout(LayoutAlgorithm.FORCE_ATLAS_2D);
+                this.currentLayout = LayoutAlgorithm.FORCE_ATLAS_2D;
+            }
+            // Re-apply the Leiden color map on the fresh NVL viewer
+            // (previously commented out — caused "Apply Leiden
+            // Clustering" to silently disappear on every engine
+            // switch into NVL).
+            if (!currentLeidenColors.isEmpty()) {
+                nvlViewer.setLeidenClusterColors(currentLeidenColors);
+            }
+            // Push the unified per-node color map so the freshly-
+            // created viewer reflects the same colors the previous
+            // engine showed.
+            nvlViewer.applyNodeColors(resolveEffective(currentNodeConfig, currentLeidenColors));
         } else {
             visViewer = new GraphViewer(this, SWT.NONE);
             wireViewer(visViewer);
@@ -194,6 +220,8 @@ public class SwitchingViewer extends Composite {
             cytoscapeViewer.setGraphData(data);
         } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
             sigmaViewer.setGraphData(data);
+        } else if (currentEngine == GraphEngine.NEO4J_NVL && nvlViewer != null) {
+            nvlViewer.setGraphData(data);
         } else if (visViewer != null) {
             visViewer.setGraphData(data);
         }
@@ -204,11 +232,68 @@ public class SwitchingViewer extends Composite {
         this.currentNodeConfig = config;
         if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
             cytoscapeViewer.setNodeConfig(config);
+            cytoscapeViewer.applyNodeColors(resolveEffective(config, currentLeidenColors));
         } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
             sigmaViewer.setNodeConfig(config);
+            sigmaViewer.applyNodeColors(resolveEffective(config, currentLeidenColors));
+        } else if (currentEngine == GraphEngine.NEO4J_NVL && nvlViewer != null) {
+            nvlViewer.setNodeConfig(config);
+            nvlViewer.applyNodeColors(resolveEffective(config, currentLeidenColors));
         } else if (visViewer != null) {
             visViewer.setNodeConfig(config);
+            visViewer.applyNodeColors(resolveEffective(config, currentLeidenColors));
         }
+    }
+
+    /**
+     * Compute the effective per-node color map for the current graph
+     * under the supplied {@code config} + {@code leiden} and forward it
+     * to the active engine, applying via that engine's
+     * {@code applyNodeColors(Map)} implementation.
+     *
+     * <p>Each engine applies the map in its own way:</p>
+     * <ul>
+     *   <li>Cytoscape — extends its existing stylesheet with one
+     *       {@code node[id = "X"]} selector per update (plus
+     *       image-swap for SVG-badge nodes).</li>
+     *   <li>vis-network — calls {@code nodes.update} with one
+     *       {@code {id, color: {background, border, ...}}} entry per
+     *       update.</li>
+     *   <li>sigma — stores the map and rebuilds the nodeReducer so
+     *       it takes precedence over {@code currentNodeConfig} /
+     *       {@code currentLeidenColors}.</li>
+     *   <li>NVL — calls {@code nvl.updateElementsInGraph} with one
+     *       {@code {id, color}} entry per update.</li>
+     * </ul>
+     *
+     * <p>This is the single entry point the
+     * {@link GraphConfigurationDialog} uses after both
+     * {@code applyLeidenClustering()} and {@code applyTagColors()} so
+     * all four engines see the same colors.</p>
+     */
+    public void applyNodeColors(NodeConfig config, Map<String, String> leidenColors) {
+        Map<String, String> effective = resolveEffective(config, leidenColors);
+        if (effective.isEmpty()) return;
+        if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
+            cytoscapeViewer.applyNodeColors(effective);
+        } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
+            sigmaViewer.applyNodeColors(effective);
+        } else if (currentEngine == GraphEngine.NEO4J_NVL && nvlViewer != null) {
+            nvlViewer.applyNodeColors(effective);
+        } else if (visViewer != null) {
+            visViewer.applyNodeColors(effective);
+        }
+    }
+
+    /**
+     * Helper: compute the effective per-node color map for the current
+     * graph, falling back to the cached {@code currentNodeConfig} /
+     * {@code currentLeidenColors} when the caller passes {@code null}.
+     */
+    private Map<String, String> resolveEffective(NodeConfig config, Map<String, String> leidenColors) {
+        NodeConfig cfg = config != null ? config : currentNodeConfig;
+        Map<String, String> leiden = leidenColors != null ? leidenColors : currentLeidenColors;
+        return NodeColorResolver.resolveEffectiveColors(currentData, cfg, leiden);
     }
 
     public NodeConfig getNodeConfig() {
@@ -217,6 +302,9 @@ public class SwitchingViewer extends Composite {
         }
         if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
             return sigmaViewer.getNodeConfig();
+        }
+        if (currentEngine == GraphEngine.NEO4J_NVL && nvlViewer != null) {
+            return nvlViewer.getNodeConfig();
         }
         if (visViewer != null) {
             return visViewer.getNodeConfig();
@@ -234,6 +322,8 @@ public class SwitchingViewer extends Composite {
             if (algorithm.isSupportedByCytoscape()) cytoscapeViewer.setLayout(algorithm);
         } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
             if (algorithm.isSupportedBySigma()) sigmaViewer.setLayout(algorithm);
+        } else if (currentEngine == GraphEngine.NEO4J_NVL && nvlViewer != null) {
+            if (algorithm.isSupportedByNvl()) nvlViewer.setLayout(algorithm);
         } else if (visViewer != null) {
             if (algorithm.isSupportedByVisNetwork()) visViewer.setLayout(algorithm);
         }
@@ -257,10 +347,16 @@ public class SwitchingViewer extends Composite {
         this.currentLeidenColors = Map.copyOf(colors);
         if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
             cytoscapeViewer.setLeidenClusterColors(currentLeidenColors);
+            cytoscapeViewer.applyNodeColors(resolveEffective(currentNodeConfig, currentLeidenColors));
         } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
             sigmaViewer.setLeidenClusterColors(currentLeidenColors);
+            sigmaViewer.applyNodeColors(resolveEffective(currentNodeConfig, currentLeidenColors));
+        } else if (currentEngine == GraphEngine.NEO4J_NVL && nvlViewer != null) {
+            nvlViewer.setLeidenClusterColors(currentLeidenColors);
+            nvlViewer.applyNodeColors(resolveEffective(currentNodeConfig, currentLeidenColors));
         } else if (visViewer != null) {
             visViewer.setLeidenClusterColors(currentLeidenColors);
+            visViewer.applyNodeColors(resolveEffective(currentNodeConfig, currentLeidenColors));
         }
     }
 
@@ -393,6 +489,8 @@ public class SwitchingViewer extends Composite {
             cytoscapeViewer.fitToScreen();
         } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
             sigmaViewer.fitToScreen();
+        } else if (currentEngine == GraphEngine.NEO4J_NVL && nvlViewer != null) {
+            nvlViewer.fitToScreen();
         } else if (visViewer != null) {
             visViewer.fitToScreen();
         }
@@ -403,6 +501,8 @@ public class SwitchingViewer extends Composite {
             cytoscapeViewer.clear();
         } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
             sigmaViewer.clear();
+        } else if (currentEngine == GraphEngine.NEO4J_NVL && nvlViewer != null) {
+            nvlViewer.clear();
         } else if (visViewer != null) {
             visViewer.clear();
         }
@@ -467,6 +567,7 @@ public class SwitchingViewer extends Composite {
         if (visViewer != null) visViewer.addNodeSelectionListener(l);
         if (cytoscapeViewer != null) cytoscapeViewer.addNodeSelectionListener(l);
         if (sigmaViewer != null) sigmaViewer.addNodeSelectionListener(l);
+        if (nvlViewer != null) nvlViewer.addNodeSelectionListener(l);
     }
 
     public void addRelationshipSelectionListener(RelationshipSelectionListener l) {
@@ -474,6 +575,7 @@ public class SwitchingViewer extends Composite {
         if (visViewer != null) visViewer.addRelationshipSelectionListener(l);
         if (cytoscapeViewer != null) cytoscapeViewer.addRelationshipSelectionListener(l);
         if (sigmaViewer != null) sigmaViewer.addRelationshipSelectionListener(l);
+        if (nvlViewer != null) nvlViewer.addRelationshipSelectionListener(l);
     }
 
     public void addSelectionClearedListener(SelectionClearedListener l) {
@@ -481,6 +583,7 @@ public class SwitchingViewer extends Composite {
         if (visViewer != null) visViewer.addSelectionClearedListener(l);
         if (cytoscapeViewer != null) cytoscapeViewer.addSelectionClearedListener(l);
         if (sigmaViewer != null) sigmaViewer.addSelectionClearedListener(l);
+        if (nvlViewer != null) nvlViewer.addSelectionClearedListener(l);
     }
 
     public void setContextMenuProvider(ContextMenuProvider provider) {
@@ -488,6 +591,7 @@ public class SwitchingViewer extends Composite {
         if (visViewer != null) visViewer.setContextMenuProvider(provider);
         if (cytoscapeViewer != null) cytoscapeViewer.setContextMenuProvider(provider);
         if (sigmaViewer != null) sigmaViewer.setContextMenuProvider(provider);
+        if (nvlViewer != null) nvlViewer.setContextMenuProvider(provider);
     }
 
     /* ---- internals ---- */
@@ -513,6 +617,12 @@ public class SwitchingViewer extends Composite {
         for (SelectionClearedListener l : clearedListeners) v.addSelectionClearedListener(l);
     }
 
+    private void wireViewer(Neo4jNvlViewer v) {
+        for (NodeSelectionListener l : nodeListeners) v.addNodeSelectionListener(l);
+        for (RelationshipSelectionListener l : relListeners) v.addRelationshipSelectionListener(l);
+        for (SelectionClearedListener l : clearedListeners) v.addSelectionClearedListener(l);
+    }
+
     private void disposeViewer() {
         if (visViewer != null && !visViewer.isDisposed()) {
             visViewer.dispose();
@@ -526,6 +636,10 @@ public class SwitchingViewer extends Composite {
             sigmaViewer.dispose();
         }
         sigmaViewer = null;
+        if (nvlViewer != null && !nvlViewer.isDisposed()) {
+            nvlViewer.dispose();
+        }
+        nvlViewer = null;
     }
 
     @Override

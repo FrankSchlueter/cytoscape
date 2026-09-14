@@ -333,4 +333,37 @@ public final class GraphData {
         }
         sb.append("  ]\n");
     }
+
+    /**
+     * Serializes the data into the {@code @neo4j-nvl/base} (NVL) payload:
+     *   { "nodes": [ {id, labels, properties, caption, color}, ... ],
+     *     "relationships": [ {id, from, to, type, ...}, ... ] }
+     *
+     * <p>Conversion rules (see design D4/D5):</p>
+     * <ul>
+     *   <li>Nodes carry {@code id}, {@code labels}, {@code properties}, plus a
+     *       {@code caption} (from {@link GraphNode#getCaption()}, which falls
+     *       back to {@code properties.name}) and a {@code color} (from
+     *       {@code visualAttrs.color}).</li>
+     *   <li>Relationships use {@code from}/{@code to} (not vis-network's
+     *       {@code source}/{@code target}).</li>
+     * </ul>
+     *
+     * <p>This is the NVL counterpart to {@link #toVisNetworkData()}. Delegates
+     * to {@link GraphNode#toNvlNode()} and {@link GraphRelationship#toNvlData()}.</p>
+     */
+    public Map<String, Object> toNvlData() {
+        List<Map<String, Object>> nodeOut = new ArrayList<>(nodes.size());
+        for (GraphNode n : nodes) {
+            nodeOut.add(n.toNvlNode());
+        }
+        List<Map<String, Object>> relOut = new ArrayList<>(relationships.size());
+        for (GraphRelationship r : relationships) {
+            relOut.add(r.toNvlData());
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("nodes", nodeOut);
+        out.put("relationships", relOut);
+        return out;
+    }    
 }

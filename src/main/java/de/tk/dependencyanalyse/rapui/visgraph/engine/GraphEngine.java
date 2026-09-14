@@ -23,7 +23,8 @@ package de.tk.dependencyanalyse.rapui.visgraph.engine;
  * renderer is in use.</p>
  */
 public enum GraphEngine {
-    VIS_NETWORK,
     CYTOSCAPE,
-    SIGMA
+    SIGMA,
+    NEO4J_NVL,
+    VIS_NETWORK
 }

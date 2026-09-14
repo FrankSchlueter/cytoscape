@@ -149,6 +149,25 @@ public final class CytoscapeJsBridge {
     }
 
     /**
+     * Push the engine-agnostic per-node effective color map produced by
+     * {@link NodeColorResolver#resolveEffectiveColors} to the iframe.
+     *
+     * <p>The JS handler {@code cgv_applyNodeColors} (in
+     * {@code cytoscape-viewer.js}) merges one
+     * {@code node[id = "X"] { background-color: ... }} style selector
+     * per entry into the existing stylesheet, so the engine picks up
+     * the new colors without a full data reload. The trailing
+     * {@code update()} + {@code preloadSvgImagesAndRedraw()} mirrors
+     * {@code cgv_applyLeidenColors} so the recolor is visible
+     * immediately, even when a previous call already set the same
+     * color (Cytoscape skips re-renders of identical property values
+     * otherwise).</p>
+     */
+    public void applyNodeColors(Map<String, String> effective) {
+        exec("window.cgv_applyNodeColors(" + gson.toJson(effective == null ? Map.of() : effective) + ");");
+    }
+
+    /**
      * Apply a layout algorithm. The JS bridge translates the algorithm name
      * to a Cytoscape layout configuration.
      */

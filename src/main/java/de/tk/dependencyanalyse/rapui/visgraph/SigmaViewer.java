@@ -173,6 +173,18 @@ public class SigmaViewer extends Browser {
         return cfg == null ? NodeConfig.defaults() : cfg;
     }
 
+    /**
+     * Apply the engine-agnostic per-node effective color map produced
+     * by {@link de.tk.dependencyanalyse.rapui.visgraph.internal.NodeColorResolver}.
+     * Pairs with {@link SwitchingViewer#applyNodeColors} so the dialog's
+     * Tag-Colors and Leiden-Colors buttons apply uniformly across all
+     * engines.
+     */
+    public void applyNodeColors(Map<String, String> effective) {
+        if (effective == null) return;
+        runWhenReady(() -> bridge.applyNodeColors(effective));
+    }
+
     public void clear() {
         runWhenReady(bridge::clear);
     }

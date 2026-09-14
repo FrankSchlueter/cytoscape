@@ -190,6 +190,20 @@ public final class SigmaJsBridge {
     }
 
     /**
+     * Push the engine-agnostic per-node effective color map produced by
+     * {@link NodeColorResolver#resolveEffectiveColors} to the iframe.
+     *
+     * <p>The JS handler {@code vg_applyNodeColors} (in
+     * {@code sigma-viewer.js}) stores the map in
+     * {@code currentEffectiveColors} and rebuilds the nodeReducer so
+     * the effective colors win over both {@code currentNodeConfig}
+     * (label/tag colors) and {@code currentLeidenColors}.</p>
+     */
+    public void applyNodeColors(Map<String, String> effective) {
+        execWhenReady("if (window.vg_applyNodeColors) { window.vg_applyNodeColors(" + gson.toJson(effective == null ? Map.of() : effective) + "); }");
+    }
+
+    /**
      * Push Leiden cluster colors. Each entry maps node id → hex color.
      */
     public void setLeidenColors(Map<String, String> colors) {

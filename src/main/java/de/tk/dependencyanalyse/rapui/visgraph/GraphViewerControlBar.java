@@ -155,20 +155,23 @@ public class GraphViewerControlBar extends Composite {
         Label lblEngine = new Label(this, SWT.NONE);
         lblEngine.setText("Engine:");
         engineCombo = new Combo(this, SWT.READ_ONLY | SWT.DROP_DOWN);
-        engineCombo.setItems(new String[] { "Cytoscape", "Sigma", "Vis" });
+        engineCombo.setItems(new String[] { "Cytoscape", "Sigma", "Nvl", "Vis" });
         if( switching.getEngine() == GraphEngine.CYTOSCAPE ) {
             engineCombo.select(0);
         } else if( switching.getEngine() == GraphEngine.SIGMA ) {
             engineCombo.select(1);
-        } else {
+        } else if( switching.getEngine() == GraphEngine.NEO4J_NVL ) {
             engineCombo.select(2);
+        } else {
+            engineCombo.select(3);
         }
         engineCombo.addSelectionListener(new SelectionAdapter() {
             @Override public void widgetSelected(SelectionEvent e) {
                 int idx = engineCombo.getSelectionIndex();
                 if (idx == 0) switching.switchTo(GraphEngine.CYTOSCAPE);
                 else if (idx == 1) switching.switchTo(GraphEngine.SIGMA);
-                else if (idx == 2) switching.switchTo(GraphEngine.VIS_NETWORK);
+                else if (idx == 2) switching.switchTo(GraphEngine.NEO4J_NVL);
+                else switching.switchTo(GraphEngine.VIS_NETWORK);
             }
         });
 
@@ -394,8 +397,10 @@ public class GraphViewerControlBar extends Composite {
             engineCombo.select(1);
         } else if (engine == GraphEngine.CYTOSCAPE) {
             engineCombo.select(0);
-        } else {
+         } else if (engine == GraphEngine.NEO4J_NVL) {
             engineCombo.select(2);
+        } else {
+            engineCombo.select(3);
         }
         // Apply a default layout for the new engine if the previous one
         // isn't supported.
@@ -408,11 +413,13 @@ public class GraphViewerControlBar extends Composite {
     private static LayoutAlgorithm[] currentLayoutsFor(GraphEngine engine) {
         if (engine == GraphEngine.CYTOSCAPE) {
             return LayoutAlgorithm.valuesForCytoscape();
-        }
-        if (engine == GraphEngine.SIGMA) {
+        } else if (engine == GraphEngine.SIGMA) {
             return LayoutAlgorithm.valuesForSigma();
+        } else if (engine == GraphEngine.NEO4J_NVL) {
+            return LayoutAlgorithm.valuesForNvl();
+        } else {
+            return LayoutAlgorithm.valuesForVisNetwork();
         }
-        return LayoutAlgorithm.valuesForVisNetwork();
     }
 
     private static int defaultLayoutIndex(LayoutAlgorithm[] layouts) {
