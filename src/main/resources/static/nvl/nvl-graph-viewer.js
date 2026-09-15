@@ -48,6 +48,16 @@
     var paletteEntries = [];
     var paletteEnabled = false;
     var paletteCollapsed = false;
+    // Edge-Filter: blendet nicht-relevante Edges aus, wenn eine Node
+    // oder eine Palette-Zeile selektiert ist. null = alle Edges sichtbar.
+    //   { type: 'node',    nodeId: '…'  }
+    //   { type: 'cluster', hex:    '#…' }
+    // Wird in den Click-Handlern gesetzt; applyEdgeFilter() überträgt den
+    // Zustand auf NVL, indem es die hidden-Property jedes Relationships
+    // per updateElementsInGraph aktualisiert. NVL respektiert hidden=true
+    // sowohl im WebGL- als auch im Canvas- und SVG-Renderer und blendet
+    // den Pfeil + Label komplett aus.
+    var edgeFilter = null;
 
     // Tooltip state
     var tooltipEl = null;
@@ -190,12 +200,35 @@
                 selectOnClick: false
             });
             clickHandler.updateCallback('onNodeClick', function (node, hits, evt) {
-                javaCall('vgv_notifyNodeSelected', node.id);
+                var id = node.id;
+                // Edge-Filter: zweiter Klick auf dieselbe Node schaltet
+                // den Filter wieder aus; ein Klick auf eine andere Node
+                // ersetzt den aktiven Filter. Der Java-Callback wird
+                // weiterhin in beiden Fällen gefeuert — die Selektion
+                // der Node bleibt davon unabhängig.
+                if (edgeFilter && edgeFilter.type === 'node' && edgeFilter.nodeId === id) {
+                    edgeFilter = null;
+                } else {
+                    edgeFilter = { type: 'node', nodeId: id };
+                }
+                applyEdgeFilter();
+                javaCall('vgv_notifyNodeSelected', id);
             });
             clickHandler.updateCallback('onRelationshipClick', function (rel, hits, evt) {
+                // Direkter Edge-Klick räumt einen aktiven Filter auf,
+                // damit der User nicht in einer Inkonsistenz landet
+                // (Filter aktiv + Edge als selektiert markiert).
+                if (edgeFilter) {
+                    edgeFilter = null;
+                    applyEdgeFilter();
+                }
                 javaCall('vgv_notifyRelationshipSelected', rel.id);
             });
             clickHandler.updateCallback('onCanvasClick', function (evt) {
+                if (edgeFilter) {
+                    edgeFilter = null;
+                    applyEdgeFilter();
+                }
                 javaCall('vgv_notifySelectionCleared');
             });
             clickHandler.updateCallback('onNodeRightClick', function (node, hits, evt) {
@@ -371,6 +404,46 @@
         }
     }
 
+    /**
+     * Überträgt den aktuellen Edge-Filter auf NVL: jeder Relationship
+     * bekommt per updateElementsInGraph ein hidden-Flag entsprechend der
+     * Filter-Regel. Bei null-Filter werden alle Relationships wieder
+     * sichtbar geschaltet. Es werden nur Updates gepusht, wenn sich der
+     * hidden-Zustand tatsächlich ändert, damit NVL nicht bei jedem
+     * Render einen vollen Re-Paint anstößt.
+     */
+    function applyEdgeFilter() {
+        if (!nvl || !nvlReady) return;
+        var rels = nvl.getRelationships();
+        if (!rels || rels.length === 0) return;
+        var updates = [];
+        var ec = currentEffectiveColors || {};
+        var lc = currentLeidenColors || {};
+        rels.forEach(function (r) {
+            var keep;
+            if (!edgeFilter) {
+                keep = true;
+            } else if (edgeFilter.type === 'node') {
+                keep = (r.from === edgeFilter.nodeId || r.to === edgeFilter.nodeId);
+            } else if (edgeFilter.type === 'cluster') {
+                var fh = (edgeFilter.hex || '').toLowerCase();
+                var sCol = ((ec[r.from] || lc[r.from] || '') + '').toLowerCase();
+                var tCol = ((ec[r.to] || lc[r.to] || '') + '').toLowerCase();
+                keep = (sCol === fh || tCol === fh);
+            } else {
+                keep = true;
+            }
+            var shouldHide = !keep;
+            if (!!r.hidden !== shouldHide) {
+                updates.push({ id: r.id, hidden: shouldHide });
+            }
+        });
+        if (updates.length > 0) {
+            try { nvl.updateElementsInGraph([], updates); }
+            catch (e) { console.error('applyEdgeFilter: NVL.updateElementsInGraph failed', e); }
+        }
+    }
+
     function waitForViewerReadyWrapper() {
         if (typeof window.vgv_viewerReady === 'function') {
             javaCall('vgv_viewerReady');
@@ -463,6 +536,9 @@
         if (relIds.length > 0) nvl.removeRelationshipsWithIds(relIds);
         currentNodeIds = [];
         currentRelIds = [];
+        // Edge-Filter mit-räumen, damit der nächste Graph-Aufbau nicht
+        // gegen einen Filter läuft, der auf alte Node-IDs verweist.
+        edgeFilter = null;
     };
 
     window.vgv_fitToScreen = function () {
@@ -690,7 +766,15 @@
             try { list = JSON.parse(entries) || []; } catch (e) { list = []; }
         }
         paletteEntries = list;
+        var wasEnabled = paletteEnabled;
         paletteEnabled = !!enabled && list.length > 0;
+        // Wenn das Panel deaktiviert wird (enabled=false), räumen wir
+        // einen eventuell aktiven Cluster-Filter auf — sonst würde der
+        // ausgeblendete Filter überleben, obwohl das Panel weg ist.
+        if (wasEnabled && !paletteEnabled && edgeFilter && edgeFilter.type === 'cluster') {
+            edgeFilter = null;
+            applyEdgeFilter();
+        }
         renderColorPalette();
     };
 
@@ -701,6 +785,13 @@
     window.vgv_hideColorPalette = function () {
         paletteEntries = [];
         paletteEnabled = false;
+        // Wenn der ausgeblendete Cluster-Filter noch aktiv war (z.B.
+        // weil ein anderer Color-Mode deaktiviert wurde), wieder alle
+        // Edges sichtbar schalten.
+        if (edgeFilter && edgeFilter.type === 'cluster') {
+            edgeFilter = null;
+            applyEdgeFilter();
+        }
         renderColorPalette();
     };
 
@@ -738,6 +829,21 @@
                 cnt.textContent = String(entry.count);
                 row.appendChild(cnt);
             }
+            // Klick auf eine Palette-Zeile setzt den Edge-Filter auf
+            // "Cluster": nur Edges von/zu Nodes mit dieser Farbe bleiben
+            // sichtbar. Zweiter Klick auf dieselbe Zeile schaltet den
+            // Filter wieder aus (Toggle).
+            row.addEventListener('click', function () {
+                var hex = String(entry.colorHex || '');
+                var currentHex = (edgeFilter && edgeFilter.hex) || '';
+                if (edgeFilter && edgeFilter.type === 'cluster'
+                        && currentHex.toLowerCase() === hex.toLowerCase()) {
+                    edgeFilter = null;
+                } else {
+                    edgeFilter = { type: 'cluster', hex: hex };
+                }
+                applyEdgeFilter();
+            });
             body.appendChild(row);
         });
         panel.classList.toggle('vgv-palette-collapsed', paletteCollapsed);

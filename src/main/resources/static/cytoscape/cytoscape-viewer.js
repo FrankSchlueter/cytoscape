@@ -43,6 +43,18 @@
     var legendEnabled = false;
     var activeLegendColor = null;
     var legendCollapsed = false;
+    // Edge-Filter: blendet alle nicht-relevanten Edges aus, wenn eine
+    // Node oder eine Palette-Zeile selektiert ist. null = kein Filter
+    // aktiv (alle Edges sichtbar). Format:
+    //   { type: 'node',    nodeId: '…'  }   – nur Edges von/zur Node
+    //   { type: 'cluster', hex:    '#…' }   – nur Edges von/zu Nodes im Cluster
+    // Wird in highlightNeighborhood / applyLegendHighlight gesetzt und in
+    // clearNeighborhoodHighlight / clearLegendHighlight zurückgenommen.
+    // Beim Hintergrund-Tap oder beim Wieder-Klick auf dieselbe Node bzw.
+    // Palette-Zeile greift die bestehende Toggle-Logik in
+    // wireCytoscapeEvents / renderLegendPanel, die ihrerseits die Clear-
+    // Funktionen aufruft — der Filter wird damit automatisch mit entfernt.
+    var edgeFilter = null;
 
     /**
      * Call a BrowserFunction on the iframe's contentWindow. BrowserFunctions
@@ -308,6 +320,14 @@
                     'border-color': '#4A90E2',
                     'border-width': 3
                 })
+                // Edge-Filter: versteckt Edges komplett (nicht nur dimmt),
+                // wenn eine Node oder eine Palette-Zeile selektiert ist und
+                // der Edge nicht zur Selektion gehört. Cytoscape berück-
+                // sichtigt `display:none` sowohl beim Hit-Test als auch
+                // beim Layout — gefilterte Edges nehmen also keinen Hit-
+                // Test-Pixel ein und räumen ihren Slot im Layout.
+                .selector('.cgv-edge-hidden')
+                .style({ 'display': 'none' })
                 .update();
         } catch (e) { /* ignore — selector rule registration is best-effort */ }
 
@@ -1403,11 +1423,17 @@
         if (!node.neighborhood) return;
         var hood = node.neighborhood().add(node);
         var others = cy.elements().difference(hood);
-        // Class-based dimming — Cytoscape computes the opacity once per
-        // frame instead of patching each element's style. Fixes the
-        // "blink on mouse-move" symptom that came from per-element
-        // inline style() calls racing with cy.style().update().
-        if (others.length > 0) others.addClass('cgv-faded');
+        // Edge-Filter: alle Edges, die nicht zur 1-Hop-Umgebung der
+        // selektierten Node gehören, komplett ausblenden. Der Node-State
+        // (Selektion + Dim) bleibt unverändert; nur die Edges werden
+        // zusätzlich hart versteckt statt nur gedimmt.
+        edgeFilter = { type: 'node', nodeId: node.id() };
+        var hoodEdges = hood.edges();
+        cy.batch(function () {
+            var nonHoodEdges = cy.edges().not(hoodEdges);
+            if (nonHoodEdges.length > 0) nonHoodEdges.addClass('cgv-edge-hidden');
+            if (others.length > 0) others.addClass('cgv-faded');
+        });
     }
 
     function highlightEdgeNeighborhood(cy, edge) {
@@ -1426,8 +1452,9 @@
         // node:selected / edge:selected selectors from the stylesheet,
         // which are the source of the red selection border highlight.
         cy.batch(function () {
-            cy.elements().removeClass('cgv-faded');
+            cy.elements().removeClass('cgv-faded cgv-edge-hidden');
         });
+        edgeFilter = null;
     }
 
     /* ---- Color Palette panel ---- */
@@ -1562,6 +1589,12 @@
         });
         var matchedSet = {};
         matched.forEach(function (n) { matchedSet[n.id()] = true; });
+        // Edge-Filter: nur Edges mit mindestens einem Endpoint im Cluster
+        // bleiben sichtbar; alle anderen Edges werden ausgeblendet.
+        edgeFilter = { type: 'cluster', hex: hex };
+        var matchedEdges = cy.edges().filter(function (e) {
+            return matchedSet[e.source().id()] || matchedSet[e.target().id()];
+        });
         cy.batch(function () {
             // Inline-style the matched-cluster border colour so the legend
             // hex propagates through, then add the shared 'cgv-faded'
@@ -1587,13 +1620,20 @@
                 var tId = e.target().id();
                 if (matchedSet[sId] && matchedSet[tId]) {
                     e.removeClass('cgv-faded');
+                    e.removeClass('cgv-edge-hidden');
                     e.style({
                         'line-color': hex,
                         'target-arrow-color': hex,
                         'opacity': 1
                     });
+                } else if (matchedSet[sId] || matchedSet[tId]) {
+                    // Bridge-Edge (genau ein Endpoint im Cluster): auch
+                    // sichtbar lassen, aber mit normaler (grauer) Linie,
+                    // damit der User sofort sieht, dass die andere Seite
+                    // außerhalb des Clusters liegt.
+                    e.removeClass('cgv-edge-hidden');
                 } else {
-                    e.addClass('cgv-faded');
+                    e.addClass('cgv-edge-hidden');
                 }
             });
         });
@@ -1654,10 +1694,12 @@
         // dem Style-Reset aufgerufen, damit der Tabellen-Render nicht
         // mitten im Style-Refresh passiert.
         hideEdgesTable();
+        // Edge-Filter zurücknehmen — alle Edges werden wieder sichtbar.
+        edgeFilter = null;
         if (!cy) return;
         cy.batch(function () {
             cy.elements()
-                .removeClass('cgv-faded')
+                .removeClass('cgv-faded cgv-edge-hidden')
                 .removeStyle('border-width border-color border-style line-color target-arrow-color');
         });
     }

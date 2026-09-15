@@ -75,6 +75,16 @@
     var selectedNodeId = null;
     var selectedEdgeId = null;
     var resizeObserved = false;
+    // Edge-Filter: blendet nicht-relevante Edges komplett aus, wenn eine
+    // Node oder eine Color-Palette-Zeile selektiert ist. null = alle
+    // Edges sichtbar. Format:
+    //   { type: 'node',    nodeId: '…'  }
+    //   { type: 'cluster', hex:    '#…' }
+    // Wird im clickNode / clickStage / Palette-Row-Handler gesetzt und
+    // in CanvasRenderer._render als Skip-Filter ausgewertet. Spiegelung
+    // in renderer.edgeFilter ist nötig, weil die Render-Schleife keinen
+    // direkten Zugriff auf das IIFE-Scope hat.
+    var edgeFilter = null;
     // Legend state
     var legendEntries = [];
     var legendEnabled = false;
@@ -331,6 +341,10 @@
         this.selectedEdgeId = null;
         this.hoveredNodeId = null;
         this.hoveredEdgeId = null;
+        // Edge-Filter-Property (siehe IIFE-Top edgeFilter): die Render-
+        // Schleife liest sie pro Frame und überspringt nicht-relevante
+        // Edges. Wird von außen über renderer.edgeFilter = … gesetzt.
+        this.edgeFilter = null;
         // Camera state — Pan-Offset und Zoom-Ratio. ratio<1 ⇒ gezoomt rein,
         // ratio>1 ⇒ gezoomt raus. Wird durch Wheel/Pan mutiert und durch
         // fitCamera() zurückgesetzt.
@@ -580,8 +594,38 @@
         }
         ctx.clearRect(0, 0, this.width, this.height);
         var self = this;
+        // Edge-Filter vorbereiten: filterFn(edge) ⇒ true wenn der Edge
+        // sichtbar bleiben soll. null-Filter ⇒ kein Skip. Closure über
+        // currentEffectiveColors / currentLeidenColors (IIFE-Top) für den
+        // Cluster-Filter; beim Node-Filter reicht die Endpoint-Prüfung.
+        var filter = this.edgeFilter;
+        var filterFn = null;
+        if (filter) {
+            var g = this.graph;
+            if (filter.type === 'node') {
+                var nid = filter.nodeId;
+                filterFn = function (edge) {
+                    return g.source(edge) === nid || g.target(edge) === nid;
+                };
+            } else if (filter.type === 'cluster') {
+                var fh = (filter.hex || '').toLowerCase();
+                var ec = currentEffectiveColors || {};
+                var lc = currentLeidenColors || {};
+                filterFn = function (edge) {
+                    var sId = g.source(edge), tId = g.target(edge);
+                    var sCol = ((ec[sId] || lc[sId] || '') + '').toLowerCase();
+                    var tCol = ((ec[tId] || lc[tId] || '') + '').toLowerCase();
+                    return sCol === fh || tCol === fh;
+                };
+            }
+        }
         // Edges first so node circles draw on top.
         this.graph.forEachEdge(function (edge) {
+            // Edge-Filter: nicht-relevante Edges überspringen (kein
+            // Stroken, kein Arrowhead, kein Label). Cluster-Filter mit
+            // Bridge-Edges (genau ein Endpoint im Cluster) bleibt
+            // sichtbar — siehe filterFn oben.
+            if (filterFn && !filterFn(edge)) return;
             var attrs = self._edgeAttrs(edge, self.graph.getEdgeAttributes(edge));
             var src = self.graph.getNodeAttributes(self.graph.source(edge));
             var tgt = self.graph.getNodeAttributes(self.graph.target(edge));
@@ -698,6 +742,30 @@
         var gx = p.inverseX(mx), gy = p.inverseY(my);
         var self = this;
         var g = this.graph;
+        // Hit-Test respektiert denselben Edge-Filter wie _render: ein
+        // ausgeblendeter Edge kann nicht mehr angeklickt werden (kein
+        // versehentliches Re-Aktivieren beim Klicken in leere Regionen,
+        // in denen unter der Maus ein gefilterter Edge liegt).
+        var filter = this.edgeFilter;
+        var filterFn = null;
+        if (filter) {
+            if (filter.type === 'node') {
+                var nid = filter.nodeId;
+                filterFn = function (edge) {
+                    return g.source(edge) === nid || g.target(edge) === nid;
+                };
+            } else if (filter.type === 'cluster') {
+                var fh2 = (filter.hex || '').toLowerCase();
+                var ec2 = currentEffectiveColors || {};
+                var lc2 = currentLeidenColors || {};
+                filterFn = function (edge) {
+                    var sId = g.source(edge), tId = g.target(edge);
+                    var sCol = ((ec2[sId] || lc2[sId] || '') + '').toLowerCase();
+                    var tCol = ((ec2[tId] || lc2[tId] || '') + '').toLowerCase();
+                    return sCol === fh2 || tCol === fh2;
+                };
+            }
+        }
         var bestNode = null, bestNodeDist = Infinity;
         var bestEdge = null, bestEdgeDist = Infinity;
         g.forEachNode(function (n) {
@@ -718,6 +786,7 @@
         });
         // Distance from point to segment in graph coords
         g.forEachEdge(function (e) {
+            if (filterFn && !filterFn(e)) return;
             var src = g.getNodeAttributes(g.source(e));
             var tgt = g.getNodeAttributes(g.target(e));
             var d = pointSegmentDistance(gx, gy, src.x, src.y, tgt.x, tgt.y);
@@ -1019,6 +1088,16 @@ function defaultSigmaSettings() {
             var n = payload && payload.node;
             if (!n) return;
             var id = n.id || n;
+            // Edge-Filter: zweiter Klick auf dieselbe Node räumt den
+            // Filter auf; Klick auf eine andere Node wechselt den Filter
+            // auf die neue Node. setSelectedNodeId bleibt für den roten
+            // Border-Highlight aktiv.
+            if (edgeFilter && edgeFilter.type === 'node' && edgeFilter.nodeId === id) {
+                edgeFilter = null;
+            } else {
+                edgeFilter = { type: 'node', nodeId: id };
+            }
+            r.edgeFilter = edgeFilter;
             selectedNodeId = id;
             selectedEdgeId = null;
             try { r.refresh(); } catch (e) {}
@@ -1028,13 +1107,26 @@ function defaultSigmaSettings() {
             var e = payload && payload.edge;
             if (!e) return;
             var id = e.id || e;
+            // Edge-Click räumt einen aktiven Edge-Filter ebenfalls auf,
+            // damit der User durch direktes Anklicken eines Edges nicht
+            // in einer Inkonsistenz landet (Filter aktiv + Edge als
+            // "selected" markiert).
+            if (edgeFilter) {
+                edgeFilter = null;
+                r.edgeFilter = null;
+            }
             selectedEdgeId = id;
             selectedNodeId = null;
             try { r.refresh(); } catch (e) {}
             javaCall('vg_notifyRelationshipSelected', id);
         });
         r.on('clickStage', function () {
-            if (selectedNodeId == null && selectedEdgeId == null) return;
+            var hadFilter = !!edgeFilter;
+            if (hadFilter) {
+                edgeFilter = null;
+                r.edgeFilter = null;
+            }
+            if (selectedNodeId == null && selectedEdgeId == null && !hadFilter) return;
             selectedNodeId = null;
             selectedEdgeId = null;
             try { r.refresh(); } catch (e) {}
@@ -1629,10 +1721,18 @@ function defaultSigmaSettings() {
                 row.appendChild(cnt);
             }
             row.addEventListener('click', function () {
+                // Edge-Filter: zweiter Klick auf dieselbe Palette-Zeile
+                // räumt den Cluster-Filter wieder auf; ein Klick auf eine
+                // andere Zeile ersetzt den aktiven Filter (Node-Filter
+                // wird dabei vom Cluster-Filter abgelöst).
                 if (activeLegendColor === entry.colorHex) {
                     activeLegendColor = null;
+                    edgeFilter = null;
+                    if (renderer) renderer.edgeFilter = null;
                 } else {
                     activeLegendColor = entry.colorHex;
+                    edgeFilter = { type: 'cluster', hex: entry.colorHex };
+                    if (renderer) renderer.edgeFilter = edgeFilter;
                 }
                 highlightLegend(activeLegendColor);
                 renderLegendPanel();
@@ -1644,6 +1744,18 @@ function defaultSigmaSettings() {
 
     function highlightLegend(color) {
         if (!renderer || !graph) return;
+        // Edge-Filter wird zentral in den Click-Handlern gesetzt; hier
+        // wird er nur noch aus dem Cluster-Fall konsistent gehalten, so
+        // dass ein direkter Aufruf von highlightLegend(null) (z.B. aus
+        // vg_applyColorPalette mit enabled=false) den Filter mit räumt.
+        if (!color) {
+            edgeFilter = null;
+            renderer.edgeFilter = null;
+        } else if (!edgeFilter || edgeFilter.type !== 'cluster'
+                || (edgeFilter.hex || '').toLowerCase() !== (color || '').toLowerCase()) {
+            edgeFilter = { type: 'cluster', hex: color };
+            renderer.edgeFilter = edgeFilter;
+        }
         if (!color) {
             renderer.setSetting('nodeReducer', buildNodeReducer(currentNodeConfig));
         } else {
@@ -1681,6 +1793,11 @@ function defaultSigmaSettings() {
 
     window.vg_clear = function () {
         if (graph) graph.clear();
+        // Edge-Filter mit-räumen — sonst würde der nächste Klick auf
+        // eine Node gegen einen Filter laufen, dessen Referenz auf
+        // bereits gelöschte Graph-Objekte zeigt.
+        edgeFilter = null;
+        if (renderer) renderer.edgeFilter = null;
         if (renderer) {
             try { renderer.refresh(); } catch (e) {}
         }
@@ -1710,6 +1827,7 @@ function defaultSigmaSettings() {
     window.vg_dispose = function () {
         try { hideTooltip(); } catch (e) {}
         activeLegendColor = null;
+        edgeFilter = null;
         var tip = $('vg-tooltip');
         if (tip && tip.parentNode) tip.parentNode.removeChild(tip);
         var sidePanel = $('vg-side-panel');
