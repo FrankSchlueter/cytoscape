@@ -384,4 +384,185 @@ class SigmaViewerJsSourceTest {
                         + "Color Palette replaces the manually-driven Legend API "
                         + "for sigma and NVL");
     }
+
+    /**
+     * Node interaction regression guard. {@code defaultSigmaSettings()}
+     * must explicitly opt the WebGL renderer into node click + hover
+     * events. {@code enableNodeHoverEvents} defaults to {@code false} in
+     * sigma v2.x — without an explicit override the {@code enterNode}
+     * event is never emitted and the Node tooltip remains invisible.
+     * {@code enableNodeClickEvents} defaults to {@code true} but we
+     * pin it explicitly so a future sigma default cannot silently
+     * break the {@link NodeSelectionListener} wiring.
+     */
+    @Test
+    void defaultSigmaSettingsEnablesNodeEvents() throws Exception {
+        String src = readViewerJs();
+        int fnStart = src.indexOf("function defaultSigmaSettings()");
+        assertTrue(fnStart > 0, "defaultSigmaSettings() must be defined");
+        int fnEnd = src.indexOf("};", fnStart);
+        assertTrue(fnEnd > fnStart, "defaultSigmaSettings() must return an object literal");
+        String settingsBlock = src.substring(fnStart, fnEnd);
+        assertTrue(settingsBlock.contains("enableNodeClickEvents: true"),
+                "defaultSigmaSettings() must set enableNodeClickEvents: true — "
+                        + "otherwise the WebGL renderer never fires clickNode and the "
+                        + "NodeSelectionListener stays silent on the WebGL path");
+        assertTrue(settingsBlock.contains("enableNodeHoverEvents: true"),
+                "defaultSigmaSettings() must set enableNodeHoverEvents: true — "
+                        + "sigma v2.x defaults this to false which means enterNode "
+                        + "is never fired and the node tooltip never reaches the DOM");
+    }
+
+    /**
+     * Arrow-type fallback regression guard. The {@code edgeReducer}
+     * must pin the {@code type} attribute to a sigma-recognised render
+     * program key ({@code arrow} or {@code line}). Without the explicit
+     * fallback the WebGL renderer relies entirely on the
+     * {@code defaultDrawEdges} setting — one default change away from
+     * silently rendering every edge as a straight line. We mirror the
+     * same guard in the {@code buildEdgeReducer} runtime function so
+     * both the default and the dynamic reducer apply it.
+     */
+    @Test
+    void edgeReducerFallsBackToArrowType() throws Exception {
+        String src = readViewerJs();
+        int reducerStart = src.indexOf("edgeReducer: function");
+        assertTrue(reducerStart > 0, "defaultSigmaSettings must define edgeReducer");
+        int reducerEnd = src.indexOf("}\n        };", reducerStart);
+        assertTrue(reducerEnd > reducerStart,
+                "edgeReducer must be terminated by '}' followed by the outer '};'");
+        String reducerBody = src.substring(reducerStart, reducerEnd);
+        assertTrue(reducerBody.contains("if (!out.type) out.type = 'arrow'"),
+                "defaultSigmaSettings.edgeReducer must pin out.type = 'arrow' when "
+                        + "no recognisable edge-program key is present — defends the "
+                        + "WebGL renderer against future defaultDrawEdges changes");
+        assertTrue(src.contains("if (!out.type) out.type = 'arrow'"),
+                "buildEdgeReducer() must also pin out.type = 'arrow' — same guard "
+                        + "must apply to the dynamic edgeReducer installed by "
+                        + "vg_applyNodeColors / vg_applyLeidenColors");
+    }
+
+    /**
+     * buildEdgeReducer regression guard. The runtime edgeReducer
+     * resolves the source node's color from the effective / Leiden color
+     * maps so the canvas renders cluster-coloured edges. Without this
+     * helper the edge falls back to grey (the {@code #888} default), and
+     * the user cannot see the community structure from the edges alone.
+     */
+    @Test
+    void buildEdgeReducerResolvesSourceNodeColor() throws Exception {
+        String src = readViewerJs();
+        assertTrue(src.contains("function buildEdgeReducer("),
+                "sigma-viewer.js must define buildEdgeReducer() to derive edge "
+                        + "color from the source node's effective / Leiden colour");
+        assertTrue(src.contains("currentEffectiveColors"),
+                "buildEdgeReducer() must consult currentEffectiveColors (highest "
+                        + "precedence — same precedence as buildNodeReducer)");
+        assertTrue(src.contains("currentLeidenColors"),
+                "buildEdgeReducer() must fall back to currentLeidenColors when "
+                        + "no effective color is set — mirrors the colour resolver path");
+        assertTrue(src.contains("graph.source(") || src.contains("graph.source ("),
+                "buildEdgeReducer() must read the source-node key via graph.source(edge) "
+                        + "so the colour lookup targets the actual edge source");
+        // Wiring — each color-applying handler must install the new reducer.
+        assertTrue(src.contains("renderer.setSetting('edgeReducer', buildEdgeReducer())"),
+                "All three apply handlers (vg_applyNodeConfig, vg_applyNodeColors, "
+                        + "vg_applyLeidenColors) must install buildEdgeReducer() so "
+                        + "the cluster colour follows when the user re-runs Leiden / Tag");
+    }
+
+    /**
+     * CanvasRenderer arrowhead regression guard. The Canvas-2D renderer
+     * is the test/dev path that runs without WebGL. It must draw a
+     * filled triangle at the target end of every edge — otherwise the
+     * directed nature of the graph is invisible in the headless /
+     * sandboxed environments that fall back to this renderer.
+     */
+    @Test
+    void canvasRendererRendersArrowheads() throws Exception {
+        String src = readViewerJs();
+        int edgeLoopStart = src.indexOf("// Edges first so node circles draw on top");
+        int edgeLoopEnd = src.indexOf("// Nodes", edgeLoopStart);
+        assertTrue(edgeLoopStart > 0 && edgeLoopEnd > edgeLoopStart,
+                "CanvasRenderer._render must contain an edge loop followed by a node loop");
+        String edgeBlock = src.substring(edgeLoopStart, edgeLoopEnd);
+        // Arrowhead = closed triangle (beginPath / moveTo / lineTo×2 / closePath / fill).
+        assertTrue(edgeBlock.contains("beginPath()") && edgeBlock.contains("closePath()")
+                        && edgeBlock.contains("ctx.fill()"),
+                "CanvasRenderer edge loop must draw a closed triangle and fill it "
+                        + "(the arrowhead geometry)");
+        assertTrue(edgeBlock.contains("tipX") && edgeBlock.contains("tipY"),
+                "CanvasRenderer edge loop must compute the arrowhead tip coordinates "
+                        + "(tipX/tipY) so the line stops before the target-node centre");
+        // The arrowhead should inherit the edge color (cluster colour via
+        // buildEdgeReducer) — assert that the source edge color is used as
+        // the fill color rather than a hard-coded '#E74C3C' or '#888'.
+        assertTrue(edgeBlock.contains("attrs.color"),
+                "CanvasRenderer arrowhead must reuse attrs.color (the buildEdgeReducer-"
+                        + "resolved cluster colour) so the pointer matches its edge");
+    }
+
+    /**
+     * CanvasRenderer edge-label regression guard. The weight label
+     * (e.g. "42", "149") is already serialised by
+     * {@code GraphRelationship.toGraphologyEdge} as
+     * {@code attributes.label}. The Canvas renderer must render it on
+     * top of the edge midpoint with a small white pill background so
+     * the text stays legible against the cluster-coloured line. The
+     * toggle is {@code settings.renderEdgeLabels !== false}.
+     */
+    @Test
+    void canvasRendererRendersEdgeLabels() throws Exception {
+        String src = readViewerJs();
+        int edgeLoopStart = src.indexOf("// Edges first so node circles draw on top");
+        int edgeLoopEnd = src.indexOf("// Nodes", edgeLoopStart);
+        assertTrue(edgeLoopStart > 0 && edgeLoopEnd > edgeLoopStart,
+                "CanvasRenderer._render must contain an edge loop followed by a node loop");
+        String edgeBlock = src.substring(edgeLoopStart, edgeLoopEnd);
+        assertTrue(edgeBlock.contains("attrs.label"),
+                "CanvasRenderer edge loop must consult attrs.label for the weight string");
+        assertTrue(edgeBlock.contains("renderEdgeLabels"),
+                "CanvasRenderer edge loop must honour settings.renderEdgeLabels "
+                        + "(so the user can suppress labels via the same settings knob "
+                        + "as the WebGL renderer)");
+        assertTrue(edgeBlock.contains("fillText(") && edgeBlock.contains("measureText("),
+                "CanvasRenderer edge loop must invoke fillText() + measureText() to "
+                        + "draw the edge label with a measured white pill background");
+    }
+
+    /**
+     * attachRendererEvents robustness regression guard. Before the
+     * doBoot refactor the registration lived inside the inner try
+     * block, so a synchronous exception inside {@code new Sigma(...)}
+     * skipped the listener wiring and the bridge reported "ready"
+     * without any click / hover / tooltip plumbing. The wiring must
+     * run OUTSIDE the createRenderer try / catch so a Canvas fallback
+     * still receives its listeners.
+     */
+    @Test
+    void attachRendererEventsOutsideTry() throws Exception {
+        String src = readViewerJs();
+        int doBootStart = src.indexOf("function doBoot(container)");
+        int doBootEnd = src.indexOf("\n    }\n", doBootStart);
+        assertTrue(doBootStart > 0 && doBootEnd > doBootStart,
+                "doBoot() must be defined as a function block");
+        String doBootBlock = src.substring(doBootStart, doBootEnd);
+        // The createRenderer try should ONLY wrap the createRenderer
+        // call — attachRendererEvents must come AFTER its closing brace.
+        int tryStart = doBootBlock.indexOf("try {");
+        int tryEnd = doBootBlock.indexOf("} catch (ex)", tryStart);
+        assertTrue(tryStart > 0 && tryEnd > tryStart,
+                "doBoot() must wrap createRenderer in its own try/catch");
+        String tryBlock = doBootBlock.substring(tryStart, tryEnd);
+        assertFalse(tryBlock.contains("attachRendererEvents"),
+                "attachRendererEvents(renderer) must NOT sit inside the createRenderer "
+                        + "try/catch — otherwise an exception in createRenderer skips the "
+                        + "listener registration and click/hover/tooltip events stay silent");
+        // Outside the try, attachRendererEvents must precede notifyViewerReady.
+        int attachPos = doBootBlock.indexOf("attachRendererEvents(");
+        int readyPos = doBootBlock.indexOf("notifyViewerReady()");
+        assertTrue(attachPos > 0 && readyPos > 0 && attachPos < readyPos,
+                "attachRendererEvents(renderer) must be called BEFORE notifyViewerReady() "
+                        + "so the bridge sees ready=true with live event listeners attached");
+    }
 }

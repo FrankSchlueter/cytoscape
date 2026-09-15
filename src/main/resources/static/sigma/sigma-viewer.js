@@ -80,7 +80,7 @@
     var legendEnabled = false;
     var activeLegendColor = null;
     var legendCollapsed = false;
-    var MIN_NODE_RADIUS = 10;
+    var MIN_NODE_RADIUS = 7;
 
     /**
      * Call a BrowserFunction on the iframe's own contentWindow.
@@ -222,19 +222,29 @@
         applyElementsAndLayout();
         try {
             renderer = createRenderer(container, graph);
-            attachRendererEvents(renderer);
-            // Once the renderer is up, re-apply the latest layout so the
-            // already-computed positions are reflected on screen.
-            try { renderer.refresh(); } catch (e) { /* ignore */ }
-            fitToViewport();
-            notifyViewerReady();
-            log('renderer ready (mode=' + (renderer._isCanvas ? 'canvas' : 'webgl') + ')');
         } catch (ex) {
-            showError('Renderer init failed: ' + ex.message);
-            console.error('[VG] renderer init failed', ex);
-            cyReady = true;
-            notifyViewerReady();
+            // WebGL path may throw on the bare 'new Sigma(...)' call when
+            // the GL context cannot be allocated. createRenderer() already
+            // catches its own internal failure and falls back to the
+            // CanvasRenderer, but if some future factor surfaces a higher-
+            // level error we still want click / hover / tooltip events to
+            // work — so fall back to a CanvasRenderer rather than
+            // abandoning the renderer entirely.
+            console.error('[VG] renderer init failed, switching to Canvas: ' + ex.message);
+            showError('Renderer init failed, using Canvas fallback: ' + ex.message);
+            renderer = new CanvasRenderer(container, graph);
         }
+        // attachRendererEvents must run AFTER we have a renderer and
+        // BEFORE the user can interact — otherwise click / hover / tooltip
+        // events fire into a no-op event emitter and the Java bridge stays
+        // silent even though the viewer reports "ready".
+        attachRendererEvents(renderer);
+        // Once the renderer is up, re-apply the latest layout so the
+        // already-computed positions are reflected on screen.
+        try { renderer.refresh(); } catch (e) { /* ignore */ }
+        fitToViewport();
+        notifyViewerReady();
+        log('renderer ready (mode=' + (renderer._isCanvas ? 'canvas' : 'webgl') + ')');
     }
 
     /**
@@ -270,10 +280,15 @@
     function createRenderer(container, graph) {
         if (typeof Sigma !== 'undefined' && hasWebGL()) {
             try {
-                return new Sigma(graph, container, defaultSigmaSettings());
+                var sigmaInstance = new Sigma(graph, container, defaultSigmaSettings());
+                log('createRenderer: using Sigma WebGL');
+                return sigmaInstance;
             } catch (e) {
                 log('Sigma WebGL renderer failed to initialise, falling back to Canvas: ' + e.message);
             }
+        } else {
+            if (typeof Sigma === 'undefined') log('createRenderer: Sigma not loaded, using Canvas fallback');
+            else if (!hasWebGL()) log('createRenderer: WebGL not available, using Canvas fallback');
         }
         return new CanvasRenderer(container, graph);
     }
@@ -333,6 +348,13 @@
         this._PAN_DRAG_THRESHOLD = 3;
         // Build canvas + 2D context.
         var dpr = window.devicePixelRatio || 1;
+        // Defensive: a previous Sigma constructor may have appended a canvas
+        // (e.g. half-initialised before throwing) which would intercept our
+        // mouse events. Remove any pre-existing canvas children so the new
+        // CanvasRenderer canvas is the only one that receives events.
+        while (container.firstChild && container.firstChild.tagName === 'CANVAS') {
+            container.removeChild(container.firstChild);
+        }
         this.canvas = document.createElement('canvas');
         this.canvas.style.position = 'absolute';
         this.canvas.style.top = '0';
@@ -340,6 +362,14 @@
         this.canvas.style.width = '100%';
         this.canvas.style.height = '100%';
         this.canvas.style.display = 'block';
+        // Explicit pointer-events so no parent rule can ever swallow mouse
+        // events on the canvas — without this, an inherited 'none' from the
+        // container would freeze pan/zoom/click/hover even though the listener
+        // attachment succeeded.
+        this.canvas.style.pointerEvents = 'auto';
+        // High z-index so the canvas sits above any orphaned sibling the
+        // sigma WebGL init may have left behind during a failed construction.
+        this.canvas.style.zIndex = '1';
         container.appendChild(this.canvas);
         this.ctx = this.canvas.getContext('2d');
         this.dpr = dpr;
@@ -390,6 +420,19 @@
         var rect = this.container.getBoundingClientRect();
         var w = Math.max(1, Math.floor(rect.width));
         var h = Math.max(1, Math.floor(rect.height));
+        // Defensive: if the container is 0×0 (e.g. parent layout not yet
+        // settled, or hidden tab) fall back to window dimensions so the
+        // canvas still has a usable backing store. Otherwise the canvas
+        // stays 0×0 forever and mouse events on the empty backing store
+        // never reach the renderer.
+        if (w === 1 && h === 1 && this.container.clientWidth > 0 && this.container.clientHeight > 0) {
+            w = Math.max(1, Math.floor(this.container.clientWidth));
+            h = Math.max(1, Math.floor(this.container.clientHeight));
+        }
+        if (w === 1 && h === 1) {
+            w = Math.max(w, Math.floor(window.innerWidth || 800));
+            h = Math.max(h, Math.floor(window.innerHeight || 600));
+        }
         this.width = w;
         this.height = h;
         this.canvas.width = w * this.dpr;
@@ -487,7 +530,16 @@
             toX: function (x) { return offsetX + (x - minX) * scale; },
             toY: function (y) { return offsetY + (spreadY - (y - minY)) * scale; },
             inverseX: function (px) { return minX + (px - offsetX) / scale; },
-            inverseY: function (py) { return minY + (spreadY - (py - offsetY)) / scale; },
+            // Inverse of toY(y) = offsetY + (spreadY - (y - minY)) * scale
+            // is y = minY + spreadY - (py - offsetY) / scale. The previous
+            // version was minY + (spreadY - (py - offsetY)) / scale which
+            // — because of operator precedence — evaluated as
+            // minY + (spreadY - py + offsetY) / scale, producing graph-y
+            // values wildly outside [minY, maxY] for any click below the
+            // top half of the canvas. The hit test then returned null for
+            // every node click, so clickNode / clickEdge / clickStage never
+            // fired and the Java bridge stayed silent.
+            inverseY: function (py) { return minY + spreadY - (py - offsetY) / scale; },
             scale: scale
         };
         this._dirty = false;
@@ -540,22 +592,76 @@
             if (typeof src.x !== 'number' || typeof tgt.x !== 'number') return;
             var x1 = p.toX(src.x), y1 = p.toY(src.y);
             var x2 = p.toX(tgt.x), y2 = p.toY(tgt.y);
-            ctx.strokeStyle = attrs.color;
-            ctx.globalAlpha = 0.7;
-            ctx.lineWidth = Math.max(0.5, attrs.size);
+            var isHighlighted = edge === self.selectedEdgeId || edge === self.hoveredEdgeId;
+            // Edge-source-half-triangle 'arrow': the headsize scales with
+            // the edge weight so heavy edges have chunkier pointers —
+            // matches the visual emphasis of Cytoscape's 'triangle'
+            // target-arrow on heavy edges.
+            var dx = x2 - x1, dy = y2 - y1;
+            var len = Math.sqrt(dx * dx + dy * dy);
+            var tipX = x2, tipY = y2;
+            var ux = 1, uy = 0;
+            if (len > 0) {
+                ux = dx / len;
+                uy = dy / len;
+            }
+            var baseX = len > 0 ? tipX - ux * Math.max(10, attrs.size * 5) : x2;
+            var baseY = len > 0 ? tipY - uy * Math.max(10, attrs.size * 5) : y2;
+            var perpX = -uy, perpY = ux;
+            // Pick the rendered edge colour — highlight overrides the
+            // cluster colour so the user can still see which edge they
+            // hovered over the palette's colour wash.
+            var lineColor = isHighlighted ? '#E74C3C' : attrs.color;
+            ctx.strokeStyle = lineColor;
+            ctx.globalAlpha = isHighlighted ? 1 : 0.7;
+            ctx.lineWidth = isHighlighted ? Math.max(2, attrs.size + 1.5) : Math.max(0.5, attrs.size);
             ctx.beginPath();
             ctx.moveTo(x1, y1);
-            ctx.lineTo(x2, y2);
+            ctx.lineTo(tipX, tipY);
             ctx.stroke();
-            // Highlight if selected/hovered
-            if (edge === self.selectedEdgeId || edge === self.hoveredEdgeId) {
-                ctx.globalAlpha = 1;
-                ctx.strokeStyle = '#E74C3C';
-                ctx.lineWidth = Math.max(2, attrs.size + 1.5);
+            // Arrowhead — fill as a closed triangle in the same colour.
+            // Minimum size bumped from 6→10 so the arrowhead is clearly
+            // visible on small edges (the old 6px triangle disappeared into
+            // the line width on weight-1 relationships).
+            if (len > 0) {
+                ctx.globalAlpha = isHighlighted ? 1 : 0.85;
+                ctx.fillStyle = lineColor;
+                var headLen = Math.max(10, attrs.size * 5);
+                var headHalf = headLen * 0.5;
                 ctx.beginPath();
-                ctx.moveTo(x1, y1);
-                ctx.lineTo(x2, y2);
-                ctx.stroke();
+                ctx.moveTo(tipX, tipY);
+                ctx.lineTo(baseX + perpX * headHalf,
+                           baseY + perpY * headHalf);
+                ctx.lineTo(baseX - perpX * headHalf,
+                           baseY - perpY * headHalf);
+                ctx.closePath();
+                ctx.fill();
+            }
+            // Edge-label rendering — disabled when renderEdgeLabels is
+            // explicitly false (mirrors sigma's WebGL setting). The
+            // weight value lives on attrs.label, set by
+            // GraphRelationship.toGraphologyEdge.
+            if (attrs.label && self.settings.renderEdgeLabels !== false) {
+                var midX = (x1 + x2) / 2, midY = (y1 + y2) / 2;
+                var labelSize = self.settings.edgeLabelSize || 10;
+                var labelFont = self.settings.labelFont || 'sans-serif';
+                var labelText = String(attrs.label);
+                ctx.font = labelSize + 'px ' + labelFont;
+                var metrics = ctx.measureText(labelText);
+                var pad = 3;
+                var w = metrics.width + pad * 2;
+                var h = labelSize + 2;
+                ctx.fillStyle = '#ffffff';
+                ctx.globalAlpha = 0.85;
+                ctx.fillRect(midX - w / 2, midY - h / 2, w, h);
+                ctx.strokeStyle = '#cccccc';
+                ctx.lineWidth = 0.5;
+                ctx.strokeRect(midX - w / 2, midY - h / 2, w, h);
+                ctx.globalAlpha = 1;
+                ctx.fillStyle = self.settings.edgeLabelColor || '#444';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(labelText, midX, midY);
             }
             ctx.globalAlpha = 1;
         });
@@ -598,9 +704,13 @@
             var attrs = self._nodeAttrs(n, g.getNodeAttributes(n));
             var dx = attrs.x - gx, dy = attrs.y - gy;
             var d = Math.sqrt(dx * dx + dy * dy);
-            // threshold: node.radius in graph units ~ node.size / projection.scale
+            // threshold: node.radius in graph units ~ node.size / projection.scale.
+            // Bumped the +2 padding to +6 so the hit window survives typical
+            // sub-pixel click offsets — without this the 16-pixel nodes in a
+            // graph spanning ~120 graph units only register hits within an
+            // 18-pixel screen radius, which is tight on retina / zoomed views.
             var hitSize = Math.max(MIN_NODE_RADIUS, attrs.size);
-            var thresh = (hitSize + 2) / p.scale;
+            var thresh = (hitSize + 6) / p.scale;
             if (d < thresh && d < bestNodeDist) {
                 bestNode = n;
                 bestNodeDist = d;
@@ -854,6 +964,17 @@ function defaultSigmaSettings() {
             enableEdgeClickEvents: true,
             enableEdgeHoverEvents: true,
             enableEdgeWheelEvents: true,
+            // Node interaction toggles — sigma.js v2.x defaults
+            // enableNodeHoverEvents to false, which means the renderer
+            // never fires enterNode / leaveNode and the Node-Tooltip
+            // (vg_tooltipBody) never reaches the DOM. Force hover on so
+            // the tooltips actually appear. enableNodeClickEvents is
+            // true by default, but we set it explicitly so a future
+            // sigma default change cannot silently break the
+            // NodeSelectionListener wiring.
+            enableNodeClickEvents: true,
+            enableNodeHoverEvents: true,
+            enableNodeWheelEvents: true,
             // Edge / node reducers are added via applyNodeConfig(...) when
             // we know the user-config; before that we render plain circles.
             nodeReducer: function (node, data) {
@@ -877,6 +998,14 @@ function defaultSigmaSettings() {
                 if (out.type && out.type !== 'arrow' && out.type !== 'line') {
                     delete out.type;
                 }
+                // Always pin the type to a sigma-recognised program key.
+                // Without this explicit fallback, sigma falls back to
+                // settings.defaultDrawEdges — which works today but is one
+                // default-change away from silently rendering every edge as
+                // a straight line. Setting it explicitly here makes the
+                // WebGL arrow rendering defensive against future sigma
+                // changes.
+                if (!out.type) out.type = 'arrow';
                 out.size = out.size || 1.2;
                 out.color = out.color || '#888';
                 out.label = out.label || '';
@@ -1342,6 +1471,7 @@ function defaultSigmaSettings() {
         currentNodeConfig = config;
         if (!renderer) return;
         renderer.setSetting('nodeReducer', buildNodeReducer(config));
+        renderer.setSetting('edgeReducer', buildEdgeReducer());
         try { renderer.refresh(); } catch (e) {}
     };
 
@@ -1360,6 +1490,7 @@ function defaultSigmaSettings() {
         currentEffectiveColors = (effective && typeof effective === 'object') ? effective : {};
         if (!renderer) return;
         renderer.setSetting('nodeReducer', buildNodeReducer(currentNodeConfig));
+        renderer.setSetting('edgeReducer', buildEdgeReducer());
         try { renderer.refresh(); } catch (e) {}
     };
 
@@ -1383,10 +1514,56 @@ function defaultSigmaSettings() {
         };
     }
 
+    /**
+     * Mirror of {@link buildNodeReducer} for edges. Derives the edge
+     * color from the source node's effective / Leiden color so the
+     * canvas renders cluster-coloured edges (matches the visual
+     * contract of the Cytoscape community-aggregation view, where the
+     * edge carries the source community colour).
+     *
+     * <p>Precedence (high → low):</p>
+     * <ol>
+     *   <li>{@code currentEffectiveColors[sourceId]} — the resolver map
+     *       pushed by {@code vg_applyNodeColors}; same precedence as
+     *       buildNodeReducer.</li>
+     *   <li>{@code currentLeidenColors[sourceId]} — the Leiden-cluster
+     *       fallback used when no effective color has been pushed.</li>
+     * </ol>
+     * When neither map has an entry, the edge keeps its existing color
+     * attribute (typically the Java-set default or the simple grey
+     * fallback).
+     */
+    function buildEdgeReducer() {
+        var leidenColors = currentLeidenColors || {};
+        var effectiveColors = currentEffectiveColors || {};
+        function nodeColor(nodeId) {
+            if (!nodeId) return null;
+            return (effectiveColors && effectiveColors[nodeId])
+                    || (leidenColors && leidenColors[nodeId])
+                    || null;
+        }
+        return function (edge, data) {
+            var out = Object.assign({}, data);
+            if (out.type && out.type !== 'arrow' && out.type !== 'line') {
+                delete out.type;
+            }
+            if (!out.type) out.type = 'arrow';
+            out.size = out.size || 1.2;
+            try {
+                var srcKey = graph && graph.source && graph.source(edge);
+                var sc = nodeColor(srcKey);
+                if (sc) out.color = sc;
+            } catch (e) { /* keep inherited color */ }
+            out.label = out.label || '';
+            return out;
+        };
+    }
+
     window.vg_applyLeidenColors = function (colorMap) {
         currentLeidenColors = colorMap || {};
         if (!renderer) return;
         renderer.setSetting('nodeReducer', buildNodeReducer(currentNodeConfig));
+        renderer.setSetting('edgeReducer', buildEdgeReducer());
         try { renderer.refresh(); } catch (e) {}
     };
 
@@ -1436,10 +1613,10 @@ function defaultSigmaSettings() {
         legendEntries.forEach(function (entry) {
             var row = document.createElement('div');
             row.className = 'vg-legend-item';
-            row.setAttribute('data-color', entry.color || '');
+            row.setAttribute('data-color', entry.colorHex || '');
             var sw = document.createElement('span');
             sw.className = 'vg-legend-swatch';
-            sw.style.background = entry.color || '#ccc';
+            sw.style.background = entry.colorHex || '#ccc';
             row.appendChild(sw);
             var lbl = document.createElement('span');
             lbl.className = 'vg-legend-label';
@@ -1452,15 +1629,15 @@ function defaultSigmaSettings() {
                 row.appendChild(cnt);
             }
             row.addEventListener('click', function () {
-                if (activeLegendColor === entry.color) {
+                if (activeLegendColor === entry.colorHex) {
                     activeLegendColor = null;
                 } else {
-                    activeLegendColor = entry.color;
+                    activeLegendColor = entry.colorHex;
                 }
                 highlightLegend(activeLegendColor);
                 renderLegendPanel();
             });
-            if (activeLegendColor === entry.color) row.classList.add('vg-legend-active');
+            if (activeLegendColor === entry.colorHex) row.classList.add('vg-legend-active');
             body.appendChild(row);
         });
     }
