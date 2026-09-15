@@ -1403,16 +1403,16 @@ public class GraphConfigurationDialog extends Dialog {
 
     /**
      * Human-readable target label for the Legend "Apply to Viewer" hint.
-     * Sigma and NVL are intentionally called out as no-ops — their Color
-     * Palette is auto-managed by the bridge from the per-node color maps
-     * ({@code applyNodeColors} / {@code setLeidenClusterColors}), so this
-     * dialog section has no effect on those engines.
+     * Sigma, Cytoscape and NVL are intentionally called out as no-ops —
+     * their Color Palette is auto-managed by the bridge from the per-node
+     * color maps ({@code applyNodeColors} / {@code setLeidenClusterColors}),
+     * so this dialog section has no effect on those engines.
      */
     private static String legendTargetLabel(GraphEngine engine) {
         if (engine == null) return "den aktiven Viewer";
         switch (engine) {
             case VIS_NETWORK:  return "vis-network";
-            case CYTOSCAPE:    return "Cytoscape";
+            case CYTOSCAPE:    return "Cytoscape (kein Effekt — Color Palette wird automatisch verwaltet)";
             case SIGMA:        return "Sigma (kein Effekt — Color Palette wird automatisch verwaltet)";
             case NEO4J_NVL:    return "NVL (kein Effekt — Color Palette wird automatisch verwaltet)";
             default:           return "den aktiven Viewer";

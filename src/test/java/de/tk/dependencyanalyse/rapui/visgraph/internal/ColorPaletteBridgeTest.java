@@ -11,20 +11,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Source-level regression guards for the Color Palette feature that
- * drives the NVL and Sigma engines. The bridge code is exercised
- * only at runtime, so these tests inspect the Java source the build
- * packages into {@code target/classes} and assert the structural
- * contracts:
+ * drives the NVL, Sigma and Cytoscape engines. The bridge code is
+ * exercised only at runtime, so these tests inspect the Java source
+ * the build packages into {@code target/classes} and assert the
+ * structural contracts:
  *
  * <ul>
  *   <li>The palette's JS API ({@code vgv_applyColorPalette},
  *       {@code vgv_hideColorPalette} for NVL; {@code vg_applyColorPalette},
- *       {@code vg_hideColorPalette} for Sigma) is invoked from
+ *       {@code vg_hideColorPalette} for Sigma; {@code cgv_applyColorPalette},
+ *       {@code cgv_hideColorPalette} for Cytoscape) is invoked from
  *       {@code setLeidenColors} / {@code applyNodeColors} / {@code clear}.</li>
  *   <li>An empty color map hides the palette (paletteVisible flips
- *       back to false and {@code vgv_hideColorPalette} is pushed).</li>
+ *       back to false and the matching hide-call is pushed).</li>
  *   <li>The legacy {@code applyLegend} / {@code clearLegend} entry points
- *       on the Sigma bridge are removed.</li>
+ *       on the Sigma / Cytoscape bridges are removed.</li>
  * </ul>
  */
 class ColorPaletteBridgeTest {
@@ -211,12 +212,12 @@ class ColorPaletteBridgeTest {
     void switchingViewerExcludesSigmaFromSetLegend() throws Exception {
         String src = readSwitching();
         int idx = src.indexOf("public void setLegend(List<LegendEntry>");
-        assertTrue(idx > 0, "SwitchingViewer.setLegend must exist (Cytoscape + vis still need it)");
+        assertTrue(idx > 0, "SwitchingViewer.setLegend must exist (vis still needs it)");
         String body = src.substring(idx, src.indexOf("public void clearLegend()", idx));
         assertFalse(body.contains("sigmaViewer.setLegend("),
                 "SwitchingViewer.setLegend must NOT route to Sigma — its Color Palette is auto-managed");
-        assertTrue(body.contains("cytoscapeViewer.setLegend("),
-                "SwitchingViewer.setLegend must still route to Cytoscape");
+        assertFalse(body.contains("cytoscapeViewer.setLegend("),
+                "SwitchingViewer.setLegend must NOT route to Cytoscape — its Color Palette is auto-managed");
         assertTrue(body.contains("visViewer.setLegend("),
                 "SwitchingViewer.setLegend must still route to vis-network");
     }
@@ -225,9 +226,113 @@ class ColorPaletteBridgeTest {
     void switchingViewerExcludesSigmaFromClearLegend() throws Exception {
         String src = readSwitching();
         int idx = src.indexOf("public void clearLegend()");
-        assertTrue(idx > 0, "SwitchingViewer.clearLegend must exist (Cytoscape + vis still need it)");
+        assertTrue(idx > 0, "SwitchingViewer.clearLegend must exist (vis still needs it)");
         String body = src.substring(idx, src.indexOf("public List<LegendEntry> getLegend()", idx));
         assertFalse(body.contains("sigmaViewer.clearLegend("),
                 "SwitchingViewer.clearLegend must NOT route to Sigma");
+        assertFalse(body.contains("cytoscapeViewer.clearLegend("),
+                "SwitchingViewer.clearLegend must NOT route to Cytoscape");
+    }
+
+    /* ---------- Cytoscape bridge ---------- */
+
+    private static final String[] POSSIBLE_CYTOSCAPE_BRIDGE = {
+            "src/main/java/de/tk/dependencyanalyse/rapui/visgraph/internal/CytoscapeJsBridge.java",
+            "target/classes/de/tk/dependencyanalyse/rapui/visgraph/internal/CytoscapeJsBridge.java"
+    };
+
+    private static String readCytoscapeBridge() throws Exception {
+        for (String p : POSSIBLE_CYTOSCAPE_BRIDGE) {
+            Path path = Paths.get(p);
+            if (Files.exists(path)) {
+                return new String(Files.readAllBytes(path), java.nio.charset.StandardCharsets.UTF_8);
+            }
+        }
+        throw new java.io.IOException("CytoscapeJsBridge.java not found");
+    }
+
+    @Test
+    void cytoscapeBridgePushesPaletteFromSetLeidenColors() throws Exception {
+        String src = readCytoscapeBridge();
+        int idx = src.indexOf("public void setLeidenColors(");
+        assertTrue(idx > 0, "CytoscapeJsBridge.setLeidenColors must exist");
+        String body = src.substring(idx, src.indexOf("public void applyCommunityView(", idx));
+        assertTrue(body.contains("window.cgv_applyLeidenColors("),
+                "CytoscapeJsBridge.setLeidenColors must push cgv_applyLeidenColors");
+        assertTrue(body.contains("refreshPalette("),
+                "CytoscapeJsBridge.setLeidenColors must invoke refreshPalette()");
+    }
+
+    @Test
+    void cytoscapeBridgePushesPaletteFromApplyNodeColors() throws Exception {
+        String src = readCytoscapeBridge();
+        int idx = src.indexOf("public void applyNodeColors(");
+        assertTrue(idx > 0, "CytoscapeJsBridge.applyNodeColors must exist");
+        String body = src.substring(idx, src.indexOf("public void setLayout(", idx));
+        assertTrue(body.contains("window.cgv_applyNodeColors("),
+                "CytoscapeJsBridge.applyNodeColors must push cgv_applyNodeColors");
+        assertTrue(body.contains("refreshPalette("),
+                "CytoscapeJsBridge.applyNodeColors must invoke refreshPalette()");
+    }
+
+    @Test
+    void cytoscapeBridgeClearHidesPalette() throws Exception {
+        String src = readCytoscapeBridge();
+        int idx = src.indexOf("public void clear(");
+        assertTrue(idx > 0, "CytoscapeJsBridge.clear() must exist");
+        String body = src.substring(idx, src.indexOf("public void fitToScreen(", idx));
+        assertTrue(body.contains("window.cgv_clear()"),
+                "CytoscapeJsBridge.clear() must push cgv_clear()");
+        assertTrue(body.contains("window.cgv_hideColorPalette()"),
+                "CytoscapeJsBridge.clear() must hide the Color Palette");
+        assertTrue(body.contains("paletteVisible = false"),
+                "CytoscapeJsBridge.clear() must reset the cached paletteVisible flag");
+    }
+
+    @Test
+    void cytoscapeBridgeEmptyMapHidesPalette() throws Exception {
+        String src = readCytoscapeBridge();
+        int idx = src.indexOf("private void refreshPalette()");
+        assertTrue(idx > 0, "CytoscapeJsBridge.refreshPalette() must exist");
+        String body = src.substring(idx, src.indexOf("private List<LegendEntry> derivePaletteEntries(", idx));
+        assertTrue(body.contains("window.cgv_hideColorPalette()"),
+                "CytoscapeJsBridge.refreshPalette() must hide the palette when no colors are set");
+        assertTrue(body.contains("paletteVisible = false"),
+                "CytoscapeJsBridge.refreshPalette() must reset paletteVisible when hiding");
+    }
+
+    @Test
+    void cytoscapeBridgeRemovedLegacyApplyLegend() throws Exception {
+        String src = readCytoscapeBridge();
+        assertFalse(src.contains("public void applyLegend("),
+                "CytoscapeJsBridge.applyLegend must be removed — Color Palette replaces the manual Legend API");
+        assertFalse(src.contains("public void clearLegend("),
+                "CytoscapeJsBridge.clearLegend must be removed — clear() now drives the palette lifecycle");
+    }
+
+    /* ---------- Cytoscape viewer ---------- */
+
+    private static final String[] POSSIBLE_CYTOSCAPE_VIEWER = {
+            "src/main/java/de/tk/dependencyanalyse/rapui/visgraph/CytoscapeViewer.java",
+            "target/classes/de/tk/dependencyanalyse/rapui/visgraph/CytoscapeViewer.java"
+    };
+
+    private static String readCytoscapeViewer() throws Exception {
+        for (String p : POSSIBLE_CYTOSCAPE_VIEWER) {
+            Path path = Paths.get(p);
+            if (Files.exists(path)) {
+                return new String(Files.readAllBytes(path), java.nio.charset.StandardCharsets.UTF_8);
+            }
+        }
+        throw new java.io.IOException("CytoscapeViewer.java not found");
+    }
+
+    @Test
+    void cytoscapeViewerRemovedLegacySetLegend() throws Exception {
+        String src = readCytoscapeViewer();
+        assertFalse(src.contains("public void setLegend("),
+                "CytoscapeViewer.setLegend must be removed — Color Palette replaces the manual Legend API");
+        assertFalse(src.contains("public void clearLegend("),
+                "CytoscapeViewer.clearLegend must be removed — clear() now drives the palette lifecycle");
     }
 }

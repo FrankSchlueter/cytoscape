@@ -5,6 +5,7 @@ import de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphData;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphNode;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphRelationship;
+import de.tk.dependencyanalyse.rapui.visgraph.data.LegendBuilder;
 import de.tk.dependencyanalyse.rapui.visgraph.data.LegendEntry;
 import com.google.gson.Gson;
 import org.eclipse.swt.browser.Browser;
@@ -64,6 +65,13 @@ public final class CytoscapeJsBridge {
     private final java.util.concurrent.atomic.AtomicReference<Object> lastContextTarget =
             new java.util.concurrent.atomic.AtomicReference<>();
 
+    /** Last Leiden cluster color map pushed via {@link #setLeidenColors}. */
+    private volatile Map<String, String> currentLeidenColors = Map.of();
+    /** Last effective color map pushed via {@link #applyNodeColors}. */
+    private volatile Map<String, String> currentEffectiveColors = Map.of();
+    /** True when the Color Palette panel should be visible. */
+    private volatile boolean paletteVisible = false;
+
     public CytoscapeJsBridge(Browser browser) {
         this.browser = browser;
         this.scriptQueue = new BrowserScriptQueue(browser);
@@ -118,6 +126,12 @@ public final class CytoscapeJsBridge {
         List<Map<String, Object>> elements = data.toCytoscapeElements(currentNodeConfig);
         LOG.info("CytoscapeJsBridge.applyData: " + elements.size() + " elements");
         exec("window.__cgv_elements = " + gson.toJson(elements) + "; window.cgv_setData();");
+        // Re-derive the palette against the freshly-loaded node set so
+        // the per-color node counts reflect the new data. The cached
+        // currentEffectiveColors / currentLeidenColors survive a
+        // setGraphData(...) call so the palette reappears automatically
+        // when the same color source still applies.
+        refreshPalette();
     }
 
     /**
@@ -162,9 +176,19 @@ public final class CytoscapeJsBridge {
      * immediately, even when a previous call already set the same
      * color (Cytoscape skips re-renders of identical property values
      * otherwise).</p>
+     *
+     * <p>Also drives the auto-managed Color Palette: a non-empty map
+     * makes the palette panel appear (entries derived via
+     * {@link LegendBuilder#combined}); an empty map hides the palette.
+     * The palette's lifecycle is tied to the most recent non-empty
+     * color push so successive {@code applyNodeColors(empty)} calls
+     * clean up state.</p>
      */
     public void applyNodeColors(Map<String, String> effective) {
-        exec("window.cgv_applyNodeColors(" + gson.toJson(effective == null ? Map.of() : effective) + ");");
+        Map<String, String> safe = effective == null ? Map.of() : effective;
+        this.currentEffectiveColors = safe;
+        exec("window.cgv_applyNodeColors(" + gson.toJson(safe) + ");");
+        refreshPalette();
     }
 
     /**
@@ -187,9 +211,19 @@ public final class CytoscapeJsBridge {
      * Apply Leiden cluster colors. {@code colors} maps node-id → hex color.
      * The JS side uses a class selector (e.g. {@code node.leiden_3}) and
      * updates the style accordingly.
+     *
+     * <p>Also drives the auto-managed Color Palette: a non-empty map
+     * makes the palette panel appear (entries derived via
+     * {@link LegendBuilder#fromLeidenClusters}); an empty map hides it.
+     * The palette's lifecycle is tied to the most recent non-empty
+     * color push so successive {@code setLeidenColors(empty)} calls
+     * clean up state.</p>
      */
     public void setLeidenColors(Map<String, String> colors) {
-        exec("window.cgv_applyLeidenColors(" + gson.toJson(colors) + ");");
+        Map<String, String> safe = colors == null ? Map.of() : colors;
+        this.currentLeidenColors = safe;
+        exec("window.cgv_applyLeidenColors(" + gson.toJson(safe) + ");");
+        refreshPalette();
     }
 
     /**
@@ -212,6 +246,14 @@ public final class CytoscapeJsBridge {
      */
     public void applyCommunityView(String mode, List<Map<String, Object>> elements, boolean dynamicSize) {
         String safeMode = (mode == null || mode.isEmpty()) ? "root" : mode;
+        // Hide the Color Palette in the aggregated community view —
+        // every community-node already carries its colour inline so the
+        // legend list would be redundant. Stashed on paletteVisible so
+        // clearCommunityView() can restore it after a drill-out.
+        if (paletteVisible) {
+            paletteVisible = false;
+            exec("window.cgv_hideColorPalette();");
+        }
         exec("window.cgv_applyCommunityView(" + gson.toJson(safeMode) + ", "
                 + gson.toJson(elements == null ? List.of() : elements) + ", "
                 + gson.toJson(dynamicSize) + ");");
@@ -222,22 +264,14 @@ public final class CytoscapeJsBridge {
      * normal (non-aggregated) state. The Java bridge must follow up by
      * re-pushing the original graph via {@link #applyData(GraphData)} so
      * the canvas actually has nodes/edges again.
+     *
+     * <p>Also re-derives the auto-managed Color Palette against the
+     * restored node set so the panel reappears after a drill-out
+     * when a colour source (Tag / Leiden) is still configured.</p>
      */
     public void clearCommunityView() {
         exec("window.cgv_clearCommunityView();");
-    }
-
-    /**
-     * Push a legend payload to the iframe. {@code entries} is rendered as
-     * the optional click-to-highlight panel positioned top-right in the
-     * Cytoscape canvas. {@code enabled} controls panel visibility — when
-     * {@code false} the panel hides but the entries are kept so toggling
-     * the checkbox in the dialog restores the panel instantly.
-     */
-    public void applyLegend(List<LegendEntry> entries, boolean enabled) {
-        exec("window.cgv_applyLegend("
-                + gson.toJson(entries == null ? List.of() : entries)
-                + ", " + (enabled ? "true" : "false") + ");");
+        refreshPalette();
     }
 
     /**
@@ -262,13 +296,16 @@ public final class CytoscapeJsBridge {
         exec("try { if (window.cgv_dispose) { window.cgv_dispose(); } } catch(e){}");
     }
 
-    /** Remove the legend panel from the iframe. */
-    public void clearLegend() {
-        exec("window.cgv_applyLegend([], false);");
-    }
-
     public void clear() {
+        // Drop cached color state so the auto-managed palette does not
+        // resurrect after a clear(). Without this the next data load
+        // would briefly show the previous palette until the next
+        // applyNodeColors / setLeidenColors call lands.
+        this.currentLeidenColors = Map.of();
+        this.currentEffectiveColors = Map.of();
+        this.paletteVisible = false;
         exec("window.cgv_clear();");
+        exec("window.cgv_hideColorPalette();");
     }
 
     public void fitToScreen() {
@@ -303,6 +340,57 @@ public final class CytoscapeJsBridge {
 
     private void exec(String script) {
         scriptQueue.exec(script);
+    }
+
+    /**
+     * Re-derive the Color Palette entries from the cached color maps
+     * and push the resulting panel state to the iframe.
+     *
+     * <p>Visibility is driven by the most recent non-empty push:</p>
+     * <ul>
+     *   <li>{@link #applyNodeColors} with a non-empty map → palette
+     *       shown with entries from {@link LegendBuilder#combined};</li>
+     *   <li>{@link #setLeidenColors} with a non-empty map → palette
+     *       shown with entries from {@link LegendBuilder#fromLeidenClusters};</li>
+     *   <li>both maps empty → palette hidden.</li>
+     * </ul>
+     *
+     * <p>The panel does NOT survive a {@link #clear()} call — that path
+     * resets both cached maps and pushes {@code cgv_hideColorPalette}.</p>
+     */
+    private void refreshPalette() {
+        Map<String, String> effective = currentEffectiveColors;
+        Map<String, String> leiden = currentLeidenColors;
+        boolean anyColors = !effective.isEmpty() || !leiden.isEmpty();
+        if (!anyColors) {
+            if (paletteVisible) {
+                paletteVisible = false;
+                exec("window.cgv_hideColorPalette();");
+            }
+            return;
+        }
+        List<LegendEntry> entries = derivePaletteEntries(effective, leiden);
+        paletteVisible = true;
+        exec("window.cgv_applyColorPalette(" + gson.toJson(entries) + ", true);");
+    }
+
+    /**
+     * Pick the highest-signal {@link LegendBuilder} source for the current
+     * color maps. {@link LegendBuilder#combined} already merges all three
+     * sources (Tag → Cluster → NodeType) and dedups by hex, so passing
+     * both maps there yields the richest labels. When the effective map
+     * is empty we fall back to the pure Leiden builder (still produces
+     * "Cluster N" labels).
+     */
+    private List<LegendEntry> derivePaletteEntries(Map<String, String> effective,
+                                                     Map<String, String> leiden) {
+        if (!effective.isEmpty()) {
+            return LegendBuilder.combined(currentData, currentNodeConfig, leiden);
+        }
+        if (!leiden.isEmpty()) {
+            return LegendBuilder.fromLeidenClusters(currentData, leiden);
+        }
+        return List.of();
     }
 
     /**

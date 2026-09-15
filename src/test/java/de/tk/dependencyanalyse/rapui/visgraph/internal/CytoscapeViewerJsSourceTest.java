@@ -740,4 +740,58 @@ class CytoscapeViewerJsSourceTest {
         assertTrue(fn.contains("isCommunity") && fn.contains("buildCommunityNodeTooltip"),
                 "buildTooltipHtml must call buildCommunityNodeTooltip for community nodes");
     }
+
+    /* -------------------------------------------------------------- */
+    /*  Color Palette (auto-managed, equivalent to sigma-viewer.js)    */
+    /* -------------------------------------------------------------- */
+
+    @Test
+    void cgvApplyColorPaletteIsImplemented() throws Exception {
+        // The auto-managed Color Palette is wired by the Java bridge
+        // (CytoscapeJsBridge.refreshPalette). The JS side must expose
+        // cgv_applyColorPalette(entries, enabled) and cgv_hideColorPalette()
+        // so the bridge calls land somewhere — without these the panel
+        // would never appear, even though the bridge pushes entries.
+        String src = readViewerJs();
+        assertTrue(src.contains("window.cgv_applyColorPalette"),
+                "cytoscape-viewer.js must register window.cgv_applyColorPalette (auto-pushed by bridge)");
+        assertTrue(src.contains("window.cgv_hideColorPalette"),
+                "cytoscape-viewer.js must register window.cgv_hideColorPalette (auto-pushed by clear())");
+    }
+
+    @Test
+    void cgvApplyLegendIsRemoved() throws Exception {
+        // The legacy manually-driven legend API must be gone — the Color
+        // Palette replaces it across all three engines (NVL, Sigma,
+        // Cytoscape). Without this guard, a future refactor could
+        // re-introduce the old bridge path and bypass the auto-managed
+        // state machine.
+        String src = readViewerJs();
+        assertFalse(src.contains("window.cgv_applyLegend"),
+                "cytoscape-viewer.js must NOT register window.cgv_applyLegend — the "
+                        + "Color Palette replaces the manually-driven Legend API for Cytoscape");
+    }
+
+    @Test
+    void colorPaletteMarkupIsPresentInCytoscapeViewerHtml() throws Exception {
+        // The #cgv-legend container must still exist (Cytoscape re-uses
+        // the same DOM the legacy legend used) and the visible header
+        // text must say "Color Palette" — matches sigma-viewer.html and
+        // nvl-viewer.html so all three engines look the same.
+        byte[] bytes;
+        Path htmlPath = null;
+        for (String p : new String[] {
+                "src/main/resources/static/cytoscape-viewer.html",
+                "target/classes/static/cytoscape-viewer.html" }) {
+            Path candidate = Paths.get(p);
+            if (Files.exists(candidate)) { htmlPath = candidate; break; }
+        }
+        assertTrue(htmlPath != null, "cytoscape-viewer.html must exist");
+        bytes = Files.readAllBytes(htmlPath);
+        String html = new String(bytes, StandardCharsets.UTF_8);
+        assertTrue(html.contains("cgv-legend"),
+                "cytoscape-viewer.html must contain the #cgv-legend container");
+        assertTrue(html.contains("Color Palette"),
+                "cytoscape-viewer.html must label the panel 'Color Palette'");
+    }
 }

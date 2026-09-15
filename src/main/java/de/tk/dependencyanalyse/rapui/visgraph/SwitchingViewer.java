@@ -87,7 +87,9 @@ public class SwitchingViewer extends Composite {
      *
      * <p>The optional legend payload (if {@link #setLegend} has been called
      * previously) is re-applied to the new engine so the panel survives an
-     * engine switch without user intervention.</p>
+     * engine switch without user intervention. Sigma / Cytoscape / NVL are
+     * excluded — their Color Palette is auto-managed from the per-node
+     * color maps and re-derives itself when the new engine boots up.</p>
      */
     public void switchTo(GraphEngine engine) {
         if (engine == null || engine == currentEngine) return;
@@ -181,17 +183,15 @@ public class SwitchingViewer extends Composite {
             setContextMenuProvider(currentContextMenuProvider);
         }
         // Re-apply the legend AFTER everything else so the panel sits on top
-        // of the freshly-applied data and styles. Sigma is excluded from
-        // this path: its Color Palette is auto-managed by the bridge from
-        // the per-node color maps (applyNodeColors / setLeidenClusterColors)
-        // and does not respond to manual setLegend() pushes. NVL never had
-        // a legend API to begin with.
-        if (legendEnabled) {
-            if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
-                cytoscapeViewer.setLegend(currentLegend, true);
-            } else if (visViewer != null) {
-                visViewer.setLegend(currentLegend, true);
-            }
+        // of the freshly-applied data and styles. Sigma and Cytoscape are
+        // excluded from this path: their Color Palette is auto-managed by
+        // the bridge from the per-node color maps (applyNodeColors /
+        // setLeidenClusterColors) and does not respond to manual
+        // setLegend() pushes. NVL never had a legend API to begin with.
+        if (legendEnabled && visViewer != null
+                && currentEngine != GraphEngine.SIGMA
+                && currentEngine != GraphEngine.CYTOSCAPE) {
+            visViewer.setLegend(currentLegend, true);
         }
         // Re-apply the community-aggregation view (Cytoscape only) so a
         // vis -> cytoscape round-trip doesn't surprise the user with a
@@ -447,21 +447,21 @@ public class SwitchingViewer extends Composite {
      * {@code enabled} controls visibility — when {@code false} the panel
      * hides but the entries are kept so toggling back on restores it.
      *
-     * <p>Sigma is excluded: its Color Palette is auto-managed by the bridge
-     * from the per-node color maps ({@link #applyNodeColors} /
-     * {@link #setLeidenClusterColors}). NVL never had a legend API. Calls
-     * for either of those engines are silently ignored.</p>
+     * <p>Sigma and Cytoscape are excluded: their Color Palette is
+     * auto-managed by the bridge from the per-node color maps
+     * ({@link #applyNodeColors} / {@link #setLeidenClusterColors}). NVL
+     * never had a legend API. Calls for any of those engines are silently
+     * ignored.</p>
      *
      * <p>The legend payload survives engine switches — after
      * {@link #switchTo(GraphEngine)} the panel is re-applied to the fresh
-     * engine automatically (except Sigma / NVL, see above).</p>
+     * engine automatically (except Sigma / Cytoscape / NVL, see above).</p>
      */
     public void setLegend(List<LegendEntry> entries, boolean enabled) {
         this.currentLegend = entries == null ? List.of() : List.copyOf(entries);
         this.legendEnabled = enabled;
-        if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
-            cytoscapeViewer.setLegend(currentLegend, enabled);
-        } else if (visViewer != null && currentEngine != GraphEngine.SIGMA) {
+        if (visViewer != null && currentEngine != GraphEngine.SIGMA
+                && currentEngine != GraphEngine.CYTOSCAPE) {
             visViewer.setLegend(currentLegend, enabled);
         }
     }
@@ -470,9 +470,8 @@ public class SwitchingViewer extends Composite {
     public void clearLegend() {
         this.currentLegend = List.of();
         this.legendEnabled = false;
-        if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
-            cytoscapeViewer.clearLegend();
-        } else if (visViewer != null && currentEngine != GraphEngine.SIGMA) {
+        if (visViewer != null && currentEngine != GraphEngine.SIGMA
+                && currentEngine != GraphEngine.CYTOSCAPE) {
             visViewer.clearLegend();
         }
     }

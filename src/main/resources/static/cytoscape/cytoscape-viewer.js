@@ -19,6 +19,8 @@
  *   cgv_requestNodeContextMenu               (id, x, y)
  *   cgv_requestRelationshipContextMenu       (id, x, y)
  *   cgv_invokeContextMenuAction              (entryId)
+ *   cgv_applyColorPalette                    (entries, enabled) -- auto-pushed by bridge
+ *   cgv_hideColorPalette                     () -- auto-pushed by clear()
  */
 
 (function () {
@@ -1428,29 +1430,39 @@
         });
     }
 
-    /* ---- Legend panel ---- */
+    /* ---- Color Palette panel ---- */
 
     /**
-     * Public entry point called by the Java bridge (window.cgv_applyLegend).
-     * The payload is a JSON-encoded array of {@code {colorHex, label, count}}
-     * records; {@code enabled} controls the panel's visibility.
+     * Render the Color Palette panel. Pairs with
+     * {@code CytoscapeJsBridge.refreshPalette} which pushes one of these
+     * per non-empty color map push. {@code enabled} controls visibility
+     * — when false the panel hides but the entries are kept so toggling
+     * back on restores the prior state.
+     *
+     * <p>Replaces the legacy {@code applyLegend} (manually-driven by
+     * {@code GraphConfigurationDialog.pushLegend}) — the panel is now
+     * auto-managed from {@code applyNodeColors} / {@code setLeidenColors}
+     * on the Java side.</p>
      */
-    function applyLegend(entriesJson, enabled) {
-        var list = [];
-        if (typeof entriesJson === 'string') {
-            try { list = JSON.parse(entriesJson) || []; }
-            catch (e) { console.warn('cgv_applyLegend: bad JSON', e); list = []; }
-        } else if (Array.isArray(entriesJson)) {
-            list = entriesJson;
-        }
-        legendEntries = list;
-        legendEnabled = !!enabled;
-        // If the legend was disabled, drop any active highlight.
+    window.cgv_applyColorPalette = function (entries, enabled) {
+        legendEntries = Array.isArray(entries) ? entries : [];
+        legendEnabled = !!enabled && legendEntries.length > 0;
         if (!legendEnabled) {
             clearLegendHighlight();
         }
         renderLegendPanel();
-    }
+    };
+
+    /**
+     * Hide the Color Palette panel. Pairs with {@code clear()} on the
+     * Java side — clears the cached color maps and the panel state.
+     */
+    window.cgv_hideColorPalette = function () {
+        legendEntries = [];
+        legendEnabled = false;
+        clearLegendHighlight();
+        renderLegendPanel();
+    };
 
     /**
      * Rebuild the legend DOM. The panel is positioned top-right (CSS) and
@@ -1498,7 +1510,7 @@
         var toggle = panel.querySelector('.cgv-legend-toggle');
         if (toggle) {
             toggle.innerHTML = legendCollapsed ? '&#x2B;' : '&#x2212;';
-            toggle.title = legendCollapsed ? 'Show legend' : 'Hide legend';
+            toggle.title = legendCollapsed ? 'Show palette' : 'Hide palette';
             toggle.onclick = function (ev) {
                 ev.stopPropagation();
                 legendCollapsed = !legendCollapsed;
@@ -2354,16 +2366,20 @@
         if (cyReady && cy) {
             cy.elements().remove();
         }
+        // Drop the auto-managed Color Palette so the panel does not
+        // resurrect on the next data load with stale entries. Pairs with
+        // CytoscapeJsBridge.clear() which also resets the cached color
+        // maps on the Java side.
+        legendEntries = [];
+        legendEnabled = false;
+        clearLegendHighlight();
+        renderLegendPanel();
     };
 
     window.cgv_fitToScreen = function () {
         if (cyReady && cy) {
             cy.fit(undefined, 30);
         }
-    };
-
-    window.cgv_applyLegend = function (entries, enabled) {
-        applyLegend(entries, enabled);
     };
 
     /**
