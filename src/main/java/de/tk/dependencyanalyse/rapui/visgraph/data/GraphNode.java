@@ -1180,7 +1180,8 @@ private static final String SVG_IMAGE_2 = "svgImage2";
 
     /**
      * Serializes this node for the sigma.js engine via the graphology
-     * schema consumed by the {@code /api/sigma/nodes} REST endpoint.
+     * schema consumed by the sigma iframe (delivered through the
+     * Rap-JS bridge, see {@code SigmaJsBridge.applyData}).
      *
      * <p>The {@code attributes} object mirrors the Cytoscape
      * {@code data} payload so the JS side can apply the same {@code showTitle},

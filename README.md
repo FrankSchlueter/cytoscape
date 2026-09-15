@@ -6,7 +6,7 @@ mit **drei umschaltbaren Rendering-Engines**:
 - **Cytoscape.js + cytoscape-fcose** als Default-Renderer (gewichtet, mit Leiden-Clustering).
 - **vis-network** als zweite Engine für klassische Force-Directed-Layouts.
 - **sigma.js + graphology** als dritte Engine, optimiert für sehr große Graphen
-  via REST-basierte Datenladung (`/api/sigma/nodes`, `/api/sigma/edges`).
+  via gzip+base64-Push über die Rap-JS-Bridge (`window.vg_setDataGz`).
 
 Die Datenebene (Nodes, Relationships, Properties) ist engine-agnostisch und
 wird vom vis-graph-Projekt adaptiert. Der Beispielgraph
@@ -21,10 +21,8 @@ dem `weight`-Attribut berechnet (`idealEdgeLength = 50 + 30·log(weight)`).
 |------------------------------|------------------------------------------------------------------------|
 | `http://localhost:8085/graph`| RAP-Entry-Point mit Cytoscape-Default-View (CSV-Beispielgraph, fcose)  |
 | `GET /api/sample-graph`      | Liefert JSON: `elements`, `cytoscapeLayoutOptions`, `stats`           |
-| `GET /api/sigma/nodes?token=X`| Sigma-Engine: Knotenliste als graphology-Element-JSON (GZIP-komprimiert) |
-| `GET /api/sigma/edges?token=X`| Sigma-Engine: Kantenliste als graphology-Element-JSON (GZIP-komprimiert) |
 | `/sigma-viewer.html`        | Eingebettetes HTML des Sigma-Viewers (für Debugging)                   |
-| `/sigma/*`                   | Statische Sigma-Bundles (`graphology`, Layout-Pakete, `sigma.min.js`)  |
+| `/sigma/*`                   | Statische Sigma-Bundles (`graphology`, Layout-Pakete, `sigma.min.js`, `pako.min.js`) |
 | `/cytoscape-viewer.html`     | Eingebettetes HTML des Cytoscape-Viewers                               |
 | `/cytoscape/*`               | Statische Cytoscape-JS-Bundles + `cytoscape-viewer.js`                 |
 | `/cytoscape/cytoscape-leiden-worker.js` | Web-Worker für Leiden-Clusteranalyse im Browser            |
@@ -37,21 +35,25 @@ einen `SigmaViewer` (sigma.js + graphology). Umschaltung erfolgt über die
 Toolbar-Combobox **Engine: Vis / Cytoscape / Sigma**; Daten, NodeConfig und
 Layout bleiben erhalten.
 
-### Sigma.js (Engine #3) — REST-basierte Datenladung
+### Sigma.js (Engine #3) — Rap-JS-Bridge mit gzip+base64
 
-Die Sigma-Engine liefert ihre Daten via REST-Endpoint (`/api/sigma/nodes`
-und `/api/sigma/edges`) statt per `BrowserFunction.exec()`. Vorteile:
+Wie Cytoscape und vis-network liefert die Sigma-Engine ihre Daten über
+einen Push vom Java-`SigmaJsBridge` an den iframe (`BrowserScriptQueue.exec`).
+Im Gegensatz zu den anderen beiden Engines wird der Payload **gzip-komprimiert
+und base64-kodiert** in einem einzigen Skript-Aufruf übertragen — kein
+REST-Endpoint, kein Per-Session-Cache, kein URL-Inlining ins HTML.
 
-1. **Größere Datenmengen**: HTTP-GZIP komprimiert die JSON-Antwort.
-2. **Standard-Caching**: `If-None-Match` mit `ETag` → `304 Not Modified`.
-3. **Saubere Trennung**: REST-Endpoint ist ohne RAP-Bootstrap testbar.
+Ablauf beim `applyData(...)`:
 
-Der Initial-Token wird beim `applyData(...)` als `UUID` generiert, im
-server-seitigen `SigmaGraphCache` (`ConcurrentHashMap`, Cleanup via
-`UISessionListener.beforeDestroy` + 30-min-TTL-Daemon) abgelegt und in
-den iframe-HTML-Body inlineiert. Der iframe bootet, holt die Graphdaten
-via `fetch(url, { credentials: 'same-origin' })` und baut den
-`graphology`-Graphen auf.
+1. `data.toGraphologyElements(currentNodeConfig)` → `Map<String, Object>` mit
+   `nodes` und `edges`.
+2. `gson.toJson(payload)` → roher JSON.
+3. `gzip + Base64.encodeToString` → komprimierter String (typisch 5–10×
+   kleiner als das rohe JSON, plus ~33 % Base64-Overhead).
+4. `execWhenReady("…; window.vg_setDataGz('" + b64 + "')")` — atomic
+   `clear + setDataGz`-Aufruf, queued bis `vg_viewerReady` feuert.
+5. Iframe dekodiert (`atob` + `pako.ungzip(bytes, {toText:true})`), parst
+   JSON und ruft `rebuildGraph(...)`.
 
 Sigma-Layouts (UMD/IIFE-Bundles lokal unter `static/sigma/`):
 
@@ -291,11 +293,27 @@ src/main/java/de/tk/dependencyanalyse/rapui/visgraph/
 │   ├── NodeConfig.java, NodeConfigAnalyzer.java, TagProperty.java
 ├── examples/CsvExampleEntryPoint.java   # Default-View /graph
 └── api/
-    ├── SigmaGraphController.java        # Sigma REST: /api/sigma/nodes + /edges
-    ├── SigmaGraphCache.java             # Per-RAP-Session-Graph-Payload-Cache
     ├── NodeConfigRegistry.java          # Per-RAP-Session-NodeConfig-Lookup
     └── SampleGraphController.java       # GET /api/sample-graph
 ```
+
+`static/sigma/`:
+
+```
+├── sigma-viewer.js                      # IIFE — Bridge-Handler (vg_setDataGz, Selection, Layout)
+├── pako.min.js                          # gzip/gunzip für die Bridge-Push-Payload
+├── sigma.min.js                         # Sigma v2.x WebGL-Renderer
+├── graphology.min.js                    # Graph-Speicher + Node/Edge-Attribute
+├── graphology-layout.min.js             # circular + random Layouts
+├── graphology-layout-forceatlas2.min.js # FA2-Layout
+└── graphology-layout-noverlap.min.js    # NoOverlap-Post-Processing
+```
+
+Die Datenlieferung läuft komplett über `SigmaJsBridge.applyData(...)` —
+kein REST-Endpoint, kein Cache mehr. Der Java-Builder serialisiert die
+`GraphData` zu `toGraphologyElements(NodeConfig)`, gzip't + base64-encodiert
+die JSON und schickt sie als `window.vg_setDataGz(b64)`-Aufruf an den
+iframe, der mit `pako.ungzip(...)` wieder dekodiert.
 
 ```
 src/main/resources/

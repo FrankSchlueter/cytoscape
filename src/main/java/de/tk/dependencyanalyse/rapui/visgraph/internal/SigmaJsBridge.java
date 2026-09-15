@@ -1,8 +1,6 @@
 package de.tk.dependencyanalyse.rapui.visgraph.internal;
 
 import com.google.gson.Gson;
-import de.tk.dependencyanalyse.rapui.visgraph.api.NodeConfigRegistry;
-import de.tk.dependencyanalyse.rapui.visgraph.api.SigmaGraphCache;
 import de.tk.dependencyanalyse.rapui.visgraph.callback.ContextMenuEntry;
 import de.tk.dependencyanalyse.rapui.visgraph.config.NodeConfig;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphData;
@@ -10,21 +8,20 @@ import de.tk.dependencyanalyse.rapui.visgraph.data.GraphNode;
 import de.tk.dependencyanalyse.rapui.visgraph.data.GraphRelationship;
 import de.tk.dependencyanalyse.rapui.visgraph.data.LegendBuilder;
 import de.tk.dependencyanalyse.rapui.visgraph.data.LegendEntry;
-import org.eclipse.rap.rwt.RWT;
-import org.eclipse.rap.rwt.service.UISession;
-import org.eclipse.rap.rwt.service.UISessionEvent;
-import org.eclipse.rap.rwt.service.UISessionListener;
 import org.eclipse.swt.browser.Browser;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.zip.GZIPOutputStream;
 
 /**
  * Manages the BrowserFunction handlers that the {@code sigma-viewer.js}
@@ -37,23 +34,20 @@ import java.util.logging.Logger;
  * same RAP session. Scripts are serialised through
  * {@link BrowserScriptQueue} to honour RAP's "one script in flight" rule.</p>
  *
- * <h2>Data delivery via REST</h2>
- * <p>Unlike the Cytoscape/vis viewers that push the elements payload via
- * {@code BrowserFunction.exec}, the sigma viewer fetches the graph from
- * {@code /api/sigma/nodes} and {@code /api/sigma/edges}. This keeps the
- * iframe-side memory profile predictable for large graphs (the
- * {@link SigmaGraphCache} holds at most one entry per RAP session, and the
- * daemon evictor drops stale entries after
- * {@link SigmaGraphCache#MAX_AGE_MINUTES} minutes) and lets the response
- * stream through the standard Servlet stack with GZIP compression
- * enabled in {@code application.yml}.</p>
+ * <h2>Data delivery via Rap-JS bridge (gzip + base64)</h2>
+ * <p>Like {@link CytoscapeJsBridge} and {@link VisJsBridge}, the sigma
+ * viewer receives its graph payload from the Java side through the
+ * {@link BrowserScriptQueue}: {@link #applyData(GraphData)} serializes the
+ * graphology payload, gzip-compresses the bytes and base64-encodes the
+ * result, then ships the string as the argument to
+ * {@code window.vg_setDataGz(b64)}. The iframe decodes the base64, gunzips
+ * with the {@code pako} library and rebuilds the graph in place — no
+ * fetch, no REST endpoints, no per-session cache.</p>
  *
- * <p>The initial token is generated server-side and inlined into the iframe
- * HTML by {@link de.tk.dependencyanalyse.rapui.visgraph.SigmaViewer} via
- * the {@code __VG_INITIAL_NODES_URL__} / {@code __VG_INITIAL_EDGES_URL__}
- * placeholders, so the iframe can refetch without a Java roundtrip once
- * the user changes the layout (the fetch URL is unchanged, the response
- * carries a {@code 304} on the next request when nothing changed).</p>
+ * <p>Pushes are queued through {@link #execWhenReady(String)} until
+ * {@code vg_viewerReady} fires, so {@link #applyData(GraphData)} can be
+ * called before the iframe IIFE has run (e.g. when {@code SigmaViewer} is
+ * constructed with an initial dataset).</p>
  */
 public final class SigmaJsBridge {
 
@@ -82,7 +76,6 @@ public final class SigmaJsBridge {
     private volatile boolean viewerReady = false;
     private volatile GraphData currentData;
     private volatile NodeConfig currentNodeConfig;
-    private volatile String currentToken;
     private volatile ContextMenuSnapshot pendingContextMenu;
     private final java.util.concurrent.atomic.AtomicReference<Object> lastContextTarget =
             new java.util.concurrent.atomic.AtomicReference<>();
@@ -93,9 +86,6 @@ public final class SigmaJsBridge {
     private volatile Map<String, String> currentEffectiveColors = Map.of();
     /** True when the palette panel should be visible. */
     private volatile boolean paletteVisible = false;
-
-    /** Tracks whether the per-session UISessionListener is registered. */
-    private final AtomicBoolean sessionListenerRegistered = new AtomicBoolean(false);
 
     public SigmaJsBridge(Browser browser) {
         this.browser = browser;
@@ -143,57 +133,51 @@ public final class SigmaJsBridge {
 
     public NodeConfig getCurrentNodeConfig() { return currentNodeConfig; }
 
-    /** Last token used to push the current graph to the iframe. */
-    public String getCurrentToken() { return currentToken; }
-
     /**
-     * Compute the initial fetch URLs for a freshly-created SigmaViewer
-     * iframe. Called by the viewer BEFORE {@code Browser.setText(html)} so
-     * the {@code __VG_INITIAL_NODES_URL__} / {@code __VG_INITIAL_EDGES_URL__}
-     * placeholders in the HTML template can be replaced with concrete
-     * addresses.
+     * Apply the graph payload to the iframe. Serialises the graphology
+     * payload (nodes + edges), gzip-compresses the bytes and base64-encodes
+     * the result, then ships the string to the iframe via
+     * {@code window.vg_setDataGz(b64)}. If the iframe is not yet booted the
+     * call is queued until {@code vg_viewerReady} fires — so this method
+     * is safe to call from {@code SigmaViewer}'s constructor before the
+     * iframe IIFE has run.
      *
-     * <p>Returns an empty array when no graph is available yet — the viewer
-     * will leave the placeholders empty and the iframe will only fetch when
-     * a later {@code applyData(...)} call fires.</p>
-     */
-    public String[] computeInitialUrls() {
-        if (currentData == null || currentData.getNodes().isEmpty()) {
-            return new String[] { "", "" };
-        }
-        return buildUrls(currentToken, currentData);
-    }
-
-    /**
-     * Apply the graph payload to the iframe. Stores the data in the
-     * per-session cache, generates a fresh token, and triggers an iframe
-     * fetch via {@code window.vg_loadGraph(...)}. If the iframe is not yet
-     * booted the call is queued until {@code vg_viewerReady} fires.
+     * <p>Matches the {@link CytoscapeJsBridge#applyData(GraphData)} and
+     * {@link VisJsBridge#applyData(GraphData)} pattern: data is pushed
+     * from Java to JS, no fetch roundtrip, no per-session REST cache.</p>
      */
     public void applyData(GraphData data) {
         this.currentData = data;
         if (data == null || data.getNodes().isEmpty()) {
-            currentToken = null;
             execWhenReady("if (window.vg_clear) { window.vg_clear(); }");
             return;
         }
-        String token = generateToken();
-        this.currentToken = token;
-        registerSessionCleanupOnce();
-        String httpSessionId = currentHttpSessionId();
-        SigmaGraphCache.put(httpSessionId, token, data);
-        String[] urls = buildUrls(token, data);
-        // Atomic call: clear + loadGraph so the iframe cannot race on
-        // a stale initial URL. Same defensive pattern as Cytoscape's
-        // applyData (see CytoscapeJsBridge.applyData).
+        Map<String, Object> payload = data.toGraphologyElements(currentNodeConfig);
+        String json = gson.toJson(payload);
+        String b64;
+        try {
+            b64 = gzipAndBase64(json);
+        } catch (IOException e) {
+            LOG.log(Level.WARNING, "SigmaJsBridge.applyData: gzip failed", e);
+            return;
+        }
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> nodes = (List<Map<String, Object>>) payload.get("nodes");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> edges = (List<Map<String, Object>>) payload.get("edges");
+        LOG.info("SigmaJsBridge.applyData: nodes=" + nodes.size()
+                + ", edges=" + edges.size()
+                + ", raw=" + json.length() + "B, gz+b64=" + b64.length() + "B");
+        // Atomic call: clear + setDataGz so the iframe cannot race on a
+        // stale cached payload. Same defensive pattern as the Cytoscape /
+        // vis bridges.
         execWhenReady("if (window.vg_clear) { window.vg_clear(); } "
-                + "if (window.vg_loadGraph) { window.vg_loadGraph("
-                + gson.toJson(urls[0]) + ", " + gson.toJson(urls[1]) + "); }");
+                + "if (window.vg_setDataGz) { window.vg_setDataGz("
+                + gson.toJson(b64) + "); }");
     }
 
     public void applyNodeConfig(NodeConfig config) {
         this.currentNodeConfig = config;
-        NodeConfigRegistry.put(currentHttpSessionId(), config);
         execWhenReady("if (window.vg_applyNodeConfig) { window.vg_applyNodeConfig(" + gson.toJson(toJsonNodeConfig(config)) + "); }");
     }
 
@@ -363,71 +347,24 @@ public final class SigmaJsBridge {
         scriptQueue.exec(script);
     }
 
-    private String[] buildUrls(String token, GraphData data) {
-        return new String[] {
-                "/api/sigma/nodes?token=" + token + "&v=" + data.getNodes().size(),
-                "/api/sigma/edges?token=" + token + "&v=" + data.getRelationships().size()
-        };
-    }
-
-    private static String generateToken() {
-        return UUID.randomUUID().toString();
-    }
-
-    private static String currentSessionId() {
-        UISession ui = RWT.getUISession();
-        return ui == null ? "no-session" : ui.getId();
-    }
-
     /**
-     * Best-effort HTTP-session-id lookup. Both this bridge (which runs on
-     * the RAP UI thread) and the {@link de.tk.dependencyanalyse.rapui.visgraph.api.SigmaGraphController}
-     * (which runs on regular Spring threads) need to look up the same
-     * cache entry — so both use {@link jakarta.servlet.http.HttpSession#getId()}.
-     * The RAP {@link UISession#getHttpSession()} bridge exposes the same
-     * session on both threads.
-     */
-    private static String currentHttpSessionId() {
-        UISession ui = RWT.getUISession();
-        if (ui == null) {
-            return currentSessionId();
-        }
-        try {
-            if (ui.getHttpSession() != null) {
-                return ui.getHttpSession().getId();
-            }
-        } catch (Exception ex) {
-            // ignore
-        }
-        return currentSessionId();
-    }
-
-    /**
-     * Register a per-session cleanup hook exactly once per bridge. The
-     * listener fires when the underlying RAP UI session is destroyed (logout,
-     * tab close, server-side timeout) and evicts the corresponding entries
-     * from {@link SigmaGraphCache} and {@link NodeConfigRegistry}.
+     * Gzip-compress a JSON string and base64-encode the resulting bytes so
+     * the payload can travel as a JavaScript string argument through
+     * {@link BrowserScriptQueue}. The iframe decodes the base64, gunzips
+     * with {@code pako.ungzip(bytes, {toText:true})} and parses the JSON.
      *
-     * <p>The defensive daemon evictor in
-     * {@link SigmaGraphCache#evictStale()} catches the rare case where the
-     * listener does NOT fire (e.g. server crash, RAP failover).</p>
+     * <p>The compression ratio on graphology payloads is typically 5–10×
+     * because of repetitive labels, colors and node-id prefixes. The
+     * base64 encoding adds ~33% overhead but is unavoidable — the
+     * underlying {@code Browser.execute(...)} API takes a String, not a
+     * byte array.</p>
      */
-    private void registerSessionCleanupOnce() {
-        if (sessionListenerRegistered.compareAndSet(false, true)) {
-            UISession ui = RWT.getUISession();
-            if (ui == null) return;
-            String sid = currentHttpSessionId();
-            try {
-                ui.addUISessionListener(new UISessionListener() {
-                    @Override public void beforeDestroy(UISessionEvent event) {
-                        SigmaGraphCache.evictSession(sid);
-                        NodeConfigRegistry.evictSession(sid);
-                    }
-                });
-            } catch (Exception ex) {
-                LOG.log(Level.WARNING, "Could not register UISessionListener — daemon evictor will catch up", ex);
-            }
+    static String gzipAndBase64(String json) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try (GZIPOutputStream gz = new GZIPOutputStream(baos)) {
+            gz.write(json.getBytes(StandardCharsets.UTF_8));
         }
+        return Base64.getEncoder().encodeToString(baos.toByteArray());
     }
 
     /**

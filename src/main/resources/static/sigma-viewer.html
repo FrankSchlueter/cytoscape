@@ -189,15 +189,13 @@
 </div>
 
 <!--
-    Initial fetch URLs are inlined by SigmaViewer on the Java side BEFORE
-    Browser.setText(...) so the iframe can start fetching as soon as it
-    boots — no race with the Java-side applyData(...) call. Empty strings
-    are fine: vg_loadGraph short-circuits and waits for a later push.
+    Data delivery: Java serializes the graphology payload, gzip-compresses
+    it, base64-encodes the bytes and ships the resulting string to the
+    iframe as the argument to window.vg_setDataGz(b64). The iframe decodes
+    the base64, gunzips via pako and rebuilds the graph — no fetch, no
+    REST endpoints, no URL inlining.
 -->
-<script>
-window.__vg_initialNodesUrl = "__VG_INITIAL_NODES_URL__";
-window.__vg_initialEdgesUrl = "__VG_INITIAL_EDGES_URL__";
-</script>
+<script src="/sigma/pako.min.js"></script>
 
 <!--
     Load order matters: graphology first, then layout packages

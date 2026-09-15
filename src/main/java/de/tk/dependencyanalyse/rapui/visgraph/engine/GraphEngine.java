@@ -11,11 +11,10 @@ package de.tk.dependencyanalyse.rapui.visgraph.engine;
  *       rendered by {@code de.tk.dependencyanalyse.rapui.visgraph.CytoscapeViewer}.</li>
  *   <li>{@link #SIGMA} — sigma.js + graphology (bundled as static assets under
  *       {@code /static/sigma/}). Renders via
- *       {@code de.tk.dependencyanalyse.rapui.visgraph.SigmaViewer}; the actual
- *       graph data is fetched from the {@code /api/sigma/nodes} and
- *       {@code /api/sigma/edges} REST endpoints instead of being pushed via
- *       {@code BrowserFunction} so large payloads can be compressed and
- *       streamed efficiently.</li>
+ *       {@code de.tk.dependencyanalyse.rapui.visgraph.SigmaViewer}; the
+ *       graph data is pushed from Java to the iframe via the Rap-JS
+ *       bridge (gzip-compressed, base64-encoded payload — see
+ *       {@code SigmaJsBridge.applyData}).</li>
  * </ul>
  *
  * <p>Each viewer widget reports its engine via {@code getEngine()} so that

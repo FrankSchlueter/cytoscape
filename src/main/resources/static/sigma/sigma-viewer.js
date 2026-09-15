@@ -8,21 +8,20 @@
  * via the iframe's own window object (see {@link javaCall}).
  *
  * <h2>Data delivery</h2>
- * <p>Unlike the cytoscape or vis viewers that receive their elements via
- * Java-pushed globals, the sigma viewer fetches its graph from
- * {@code /api/sigma/nodes} and {@code /api/sigma/edges}. The initial URL
- * is inlined into the iframe HTML before {@code Browser.setText(...)} so
- * the iframe can start fetching as soon as it boots — eliminating the race
- * with Java-side {@code applyData(...)}.</p>
- *
- * <p>Globals read by Java / written by JS:</p>
- * <ul>
- *   <li>(read)  window.__vg_initialNodesUrl, __vg_initialEdgesUrl — initial fetch URLs inlined by Java</li>
- * </ul>
+ * <p>The sigma viewer receives its graph from the Java side via the
+ * Rap-JS bridge: {@link SigmaJsBridge#applyData} serializes the
+ * graphology payload, gzip-compresses and base64-encodes it, and ships the
+ * resulting string to the iframe as the argument to
+ * {@code window.vg_setDataGz(b64)}. The iframe decodes the base64, gunzips
+ * with {@code pako.ungzip(...)} and rebuilds the graph in place — no
+ * fetch, no REST endpoints, no URL inlining. Pushes are queued until
+ * {@code vg_viewerReady} fires, so the iframe can boot independently of
+ * whether {@code applyData(...)} has already run.</p>
  *
  * <p>Java-callable API (window.vg_*):</p>
  * <ul>
  *   <li>vg_viewerReady                          ()  -- after sigma is sized</li>
+ *   <li>vg_setDataGz                            (b64GzippedJson)  -- bridge push, gzip+base64</li>
  *   <li>vg_notifyNodeSelected                   (id)</li>
  *   <li>vg_notifyRelationshipSelected           (id)</li>
  *   <li>vg_notifySelectionCleared               ()</li>
@@ -37,11 +36,10 @@
  *   <li>vg_hideColorPalette                     () -- auto-pushed by clear()</li>
  *   <li>vg_clear                                ()</li>
  *   <li>vg_fitToScreen                          ()</li>
- *   <li>vg_resize                               ()</li>
+ *   <item>vg_resize                             ()</item>
  *   <li>vg_dispose                              ()</li>
  *   <li>vg_showContextMenu                      (snapshot, x, y)</li>
  *   <li>vg_hideContextMenu                      ()</li>
- *   <li>vg_loadGraph                            (nodesUrl, edgesUrl)</li>
  * </ul>
  */
 
@@ -52,7 +50,7 @@
     var renderer = null;
     var cyReady = false;
     // Re-entrancy guard for the apply-data path — without it a second
-    // vg_loadGraph arriving mid-flight could clobber the in-flight rebuild.
+    // vg_setDataGz arriving mid-flight could clobber the in-flight rebuild.
     var vgSetBusy = false;
     var vgSetPending = null;
     var currentLayout = 'FORCE_DIRECTED_2_SIGMA';
@@ -68,8 +66,6 @@
      * the dialog vs. the resolver path. Empty / null = no override.
      */
     var currentEffectiveColors = {};
-    var cachedNodesEtag = null;
-    var cachedEdgesEtag = null;
     var cachedNodesBody = null;
     var cachedEdgesBody = null;
     var selectedNodeId = null;
@@ -1232,40 +1228,79 @@ function defaultSigmaSettings() {
         if (tip) tip.style.display = 'none';
     }
 
-    /* ---- Fetch + apply ---- */
+    /* ---- Bridge push + apply ---- */
 
-    function vg_loadGraph(nodesUrl, edgesUrl) {
-        log('vg_loadGraph: ' + nodesUrl + ', ' + edgesUrl);
-        if (nodesUrl && typeof nodesUrl === 'string') window.__vg_initialNodesUrl = nodesUrl;
-        if (edgesUrl && typeof edgesUrl === 'string') window.__vg_initialEdgesUrl = edgesUrl;
-        if (!cyReady || !renderer) return; // boot() picks them up on first fire
+    /**
+     * Decode a base64 string into a Uint8Array. Browser-only helper that
+     * mirrors the canonical {@code atob(...)} → {@code Uint8Array}
+     * conversion. We do it in plain JS (no TextDecoder roundtrip) so the
+     * path stays allocation-light for large payloads.
+     */
+    function b64ToBytes(b64) {
+        var raw = atob(b64);
+        var bytes = new Uint8Array(raw.length);
+        for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+        return bytes;
+    }
+
+    /**
+     * Handle a Java-side push of a gzip+base64-encoded JSON payload.
+     * Decodes the bytes, gunzips with {@code pako}, parses the resulting
+     * graphology JSON and caches the result. If the renderer has already
+     * booted, kicks off {@link applyElementsAndLayout}; otherwise the
+     * cached payload is picked up by the boot path.
+     *
+     * @param {string} b64GzippedJson base64(gzip(JSON.stringify(payload)))
+     */
+    function vg_setDataGz(b64GzippedJson) {
+        if (typeof b64GzippedJson !== 'string' || b64GzippedJson.length === 0) {
+            showError('vg_setDataGz: empty payload');
+            return;
+        }
+        if (typeof pako === 'undefined' || typeof pako.ungzip !== 'function') {
+            showError('vg_setDataGz: pako not loaded — check /sigma/pako.min.js');
+            return;
+        }
+        var json;
+        try {
+            var bytes = b64ToBytes(b64GzippedJson);
+            // pako 3.x: {toText:true} returns a UTF-8 decoded string;
+            // {to:'string'} returns a Uint8Array. We want the string form.
+            json = pako.ungzip(bytes, { toText: true });
+        } catch (e) {
+            showError('vg_setDataGz: gunzip failed: ' + e.message);
+            return;
+        }
+        var payload;
+        try {
+            payload = JSON.parse(json);
+        } catch (e) {
+            showError('vg_setDataGz: JSON.parse failed: ' + e.message);
+            return;
+        }
+        cachedNodesBody = { nodes: payload.nodes || [] };
+        cachedEdgesBody = { edges: payload.edges || [] };
+        log('vg_setDataGz: nodes=' + cachedNodesBody.nodes.length
+                + ', edges=' + cachedEdgesBody.edges.length);
+        if (!cyReady || !renderer) return; // boot() picks it up
         applyElementsAndLayout();
     }
-    window.vg_loadGraph = vg_loadGraph;
+    window.vg_setDataGz = vg_setDataGz;
 
+    /**
+     * Rebuild the graph from the cached payload and re-run the current
+     * layout. The re-entrancy guard coalesces concurrent calls so a
+     * second {@code vg_setDataGz(...)} arriving mid-flight does not
+     * clobber the in-flight rebuild.
+     */
     async function applyElementsAndLayout() {
         if (!graph) return;
-        // Re-entrancy guard: coalesce concurrent load requests
         if (vgSetBusy) {
             vgSetPending = true;
             return;
         }
         vgSetBusy = true;
         try {
-            var nodesUrl = window.__vg_initialNodesUrl;
-            var edgesUrl = window.__vg_initialEdgesUrl;
-            var nodesResp = nodesUrl ? await fetchWithEtag(nodesUrl, 'nodes') : null;
-            var edgesResp = edgesUrl ? await fetchWithEtag(edgesUrl, 'edges') : null;
-            if (nodesResp && nodesResp.status === 304 && cachedNodesBody) {
-                // unchanged
-            } else if (nodesResp && nodesResp.ok) {
-                cachedNodesBody = await nodesResp.json();
-            }
-            if (edgesResp && edgesResp.status === 304 && cachedEdgesBody) {
-                // unchanged
-            } else if (edgesResp && edgesResp.ok) {
-                cachedEdgesBody = await edgesResp.json();
-            }
             if (cachedNodesBody || cachedEdgesBody) {
                 rebuildGraph(
                     cachedNodesBody ? (cachedNodesBody.nodes || []) : [],
@@ -1283,19 +1318,6 @@ function defaultSigmaSettings() {
                 applyElementsAndLayout();
             }
         }
-    }
-
-    async function fetchWithEtag(url, kind) {
-        var headers = {};
-        if (kind === 'nodes' && cachedNodesEtag) headers['If-None-Match'] = cachedNodesEtag;
-        if (kind === 'edges' && cachedEdgesEtag) headers['If-None-Match'] = cachedEdgesEtag;
-        var resp = await fetch(url, { credentials: 'same-origin', headers: headers });
-        if (resp.ok) {
-            var etag = resp.headers.get('ETag');
-            if (kind === 'nodes') cachedNodesEtag = etag;
-            if (kind === 'edges') cachedEdgesEtag = etag;
-        }
-        return resp;
     }
 
     function rebuildGraph(nodes, edges) {

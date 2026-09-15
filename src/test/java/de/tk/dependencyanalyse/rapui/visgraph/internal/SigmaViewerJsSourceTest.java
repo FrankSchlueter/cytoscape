@@ -18,14 +18,16 @@ import static org.junit.jupiter.api.Assertions.fail;
 /**
  * Source-level regression guards for {@code sigma-viewer.js}. The bridge
  * is JS-only — no Java unit tests can exercise the WebGL renderer or the
- * fetch path against a real browser — but the file MUST satisfy a set of
- * structural contracts:
+ * gzip-decode path against a real browser — but the file MUST satisfy a
+ * set of structural contracts:
  *
  * <ul>
- *   <li>Data is delivered via {@code fetch(...)} against the REST endpoints,
- *       NOT by Java pushing globals like {@code __vg_nodes}/{@code __vg_edges}
- *       into the iframe (the legacy vis-network / Cytoscape pattern is
- *       explicitly forbidden for sigma).</li>
+ *   <li>Data is delivered via the Rap-JS bridge (Java pushes a
+ *       gzip+base64-encoded JSON payload into
+ *       {@code window.vg_setDataGz(b64)}), NOT by a REST fetch against
+ *       {@code /api/sigma/nodes} or {@code /api/sigma/edges}. The
+ *       iframe decodes the base64, gunzips with {@code pako} and
+ *       rebuilds the graph in place.</li>
  *   <li>{@code runForceDirected2(graph)} performs two layout passes —
  *       FA2 (with a log10-weight-driven edgeWeight) and NoOverlap (with
  *       a fit-to-container ratio) — and pins the graph spread to ~85 %
@@ -44,6 +46,11 @@ class SigmaViewerJsSourceTest {
             "target/classes/static/sigma/sigma-viewer.js",
     };
 
+    private static final String[] POSSIBLE_HTML_PATHS = {
+            "src/main/resources/static/sigma-viewer.html",
+            "target/classes/static/sigma-viewer.html",
+    };
+
     private static String readViewerJs() throws IOException {
         for (String p : POSSIBLE_VIEWER_PATHS) {
             Path path = Paths.get(p);
@@ -54,19 +61,88 @@ class SigmaViewerJsSourceTest {
         throw new IOException("sigma-viewer.js not found in any known location");
     }
 
+    private static String readViewerHtml() throws IOException {
+        for (String p : POSSIBLE_HTML_PATHS) {
+            Path path = Paths.get(p);
+            if (Files.exists(path)) {
+                return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+            }
+        }
+        throw new IOException("sigma-viewer.html not found in any known location");
+    }
+
     @Test
-    void sigmaViewerScriptLoadsOverFetchNotLegacyGlobals() throws Exception {
+    void sigmaViewerScriptLoadsOverBridgeNotFetch() throws Exception {
         String src = readViewerJs();
-        // The bridge MUST use fetch() — the legacy vis/cytoscape pattern of
-        // setting window.__vg_nodes / window.__vg_edges is explicitly forbidden.
-        assertTrue(src.contains("function fetchWithEtag"),
-                "sigma-viewer.js must implement fetchWithEtag() to load the graph payload");
-        assertTrue(src.contains("fetch("),
-                "sigma-viewer.js must invoke fetch(url, ...) to load nodes/edges");
-        assertFalse(src.contains("window.__vg_nodes =") || src.contains("__vg_nodes ="),
-                "sigma-viewer.js must not assign global __vg_nodes — payload comes via fetch");
-        assertFalse(src.contains("window.__vg_edges =") || src.contains("__vg_edges ="),
-                "sigma-viewer.js must not assign global __vg_edges — payload comes via fetch");
+        // The bridge MUST accept a gzip+base64 push from Java via
+        // window.vg_setDataGz(b64) — the legacy REST fetch pattern is
+        // explicitly forbidden.
+        assertTrue(src.contains("window.vg_setDataGz"),
+                "sigma-viewer.js must register window.vg_setDataGz to receive "
+                        + "the gzip+base64 graph payload from the Java bridge");
+        assertTrue(src.contains("pako.ungzip"),
+                "sigma-viewer.js must call pako.ungzip(...) to decompress the "
+                        + "gzip-encoded payload pushed by the Java bridge");
+        assertFalse(src.contains("function fetchWithEtag"),
+                "sigma-viewer.js must NOT define fetchWithEtag — the REST fetch path "
+                        + "was removed in favour of the Rap-JS bridge push");
+        assertFalse(src.contains("fetch(\""),
+                "sigma-viewer.js must NOT invoke fetch() — data comes via the "
+                        + "bridge (window.vg_setDataGz), not over REST");
+    }
+
+    /**
+     * HTML regression guard: the sigma iframe template must load
+     * {@code pako.min.js} BEFORE {@code sigma-viewer.js} so the
+     * {@code pako.ungzip(...)} call inside {@code vg_setDataGz} finds
+     * the {@code pako} global at runtime. The legacy
+     * {@code __VG_INITIAL_NODES_URL__} / {@code __VG_INITIAL_EDGES_URL__}
+     * placeholders must be gone — the Java side no longer inlines
+     * REST URLs into the iframe HTML.
+     */
+    @Test
+    void sigmaViewerHtmlLoadsPakoAndDropsLegacyPlaceholders() throws Exception {
+        String html = readViewerHtml();
+        assertTrue(html.contains("/sigma/pako.min.js"),
+                "sigma-viewer.html must load /sigma/pako.min.js before sigma-viewer.js");
+        // pako must come BEFORE sigma-viewer.js in the HTML so the global
+        // is defined when the viewer IIFE runs.
+        int pakoIdx = html.indexOf("/sigma/pako.min.js");
+        int viewerIdx = html.indexOf("/sigma/sigma-viewer.js");
+        assertTrue(pakoIdx > 0 && viewerIdx > 0 && pakoIdx < viewerIdx,
+                "sigma-viewer.html must load pako.min.js BEFORE sigma-viewer.js — "
+                        + "otherwise vg_setDataGz() finds pako === undefined on first push");
+        assertFalse(html.contains("__VG_INITIAL_NODES_URL__"),
+                "sigma-viewer.html must NOT contain the legacy __VG_INITIAL_NODES_URL__ placeholder "
+                        + "— REST fetch URLs were removed when data delivery moved to the bridge");
+        assertFalse(html.contains("__VG_INITIAL_EDGES_URL__"),
+                "sigma-viewer.html must NOT contain the legacy __VG_INITIAL_EDGES_URL__ placeholder");
+    }
+
+    /**
+     * pako.min.js must be present in the bundle and define the
+     * {@code pako.ungzip(...)} entry point the JS bridge calls.
+     */
+    @Test
+    void pakoBundleIsPresent() throws Exception {
+        String[] candidates = {
+                "src/main/resources/static/sigma/pako.min.js",
+                "target/classes/static/sigma/pako.min.js",
+        };
+        String pako = null;
+        for (String p : candidates) {
+            Path path = Paths.get(p);
+            if (Files.exists(path)) {
+                pako = new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+                break;
+            }
+        }
+        assertNotNull(pako, "pako.min.js must be present in src/main/resources/static/sigma/");
+        // pako_inflate.umd.min.js exposes pako.ungzip via the global namespace.
+        // We assert presence of the function reference (it appears in the UMD
+        // factory call as `e.ungzip = Wt` — a minified string match is enough).
+        assertTrue(pako.contains("ungzip"),
+                "pako.min.js must expose the ungzip(...) entry point used by vg_setDataGz");
     }
 
     @Test
@@ -136,6 +212,7 @@ class SigmaViewerJsSourceTest {
                         "var graphologyLayout={circular:{},random:{},circlepack:{}};" +
                         "var graphologyLayoutForceAtlas2={assign:function(){}};" +
                         "var graphologyLayoutNoverlap={assign:function(){}};" +
+                        "var pako={ungzip:function(){}};" +
                         "var sigma=function(){};" + stripped + "})";
                 eng.eval(probe);
             } catch (javax.script.ScriptException se) {

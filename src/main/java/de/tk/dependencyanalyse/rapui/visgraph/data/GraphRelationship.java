@@ -356,8 +356,8 @@ public final class GraphRelationship {
 
     /**
      * Serializes this relationship for the sigma.js engine via the
-     * graphology schema consumed by the {@code /api/sigma/edges} REST
-     * endpoint.
+     * graphology schema consumed by the sigma iframe (delivered through
+     * the Rap-JS bridge, see {@code SigmaJsBridge.applyData}).
      *
      * <p>The {@code attributes} map mirrors the Cytoscape {@code data}
      * payload: {@code label} (the {@code weight} value when present,

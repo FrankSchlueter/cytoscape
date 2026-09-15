@@ -30,36 +30,30 @@ Die Engine ist auf zwei Designziele hin optimiert:
 │  SigmaViewer (Browser)                                                  │
 │   │  Constructor parameters: (parent, style, htmlOrResourcePath, data)  │
 │   │  bridge = new SigmaJsBridge(this)                                   │
-│   │  if (data != null) bridge.applyData(data)  ← URL-Token-Generation   │
+│   │  if (data != null) bridge.applyData(data)  ← Push-via-Bridge          │
 │   │  html = loadClasspathResource("sigma-viewer.html")                  │
-│   │  html = html.replace("__VG_INITIAL_NODES_URL__", bridge.computed[]) │
-│   │  html = html.replace("__VG_INITIAL_EDGES_URL__", bridge.computed[]) │
 │   │  setText(html)                                                      │
 │   │  ResizeListener → bridge.resize() (NoOp-Resize für Canvas-Pfad)     │
 │       │                                                                 │
 │       ▼                                                                 │
 │  SigmaJsBridge                                                          │
 │   │  applyData(data):                                                   │
-│   │     1. token = UUID.randomUUID()                                    │
-│   │     2. SigmaGraphCache.put(httpSessionId, token, data)              │
-│   │     3. execWhenReady(atomic call: vg_clear + vg_loadGraph)          │
+│   │     1. payload = data.toGraphologyElements(currentNodeConfig)       │
+│   │     2. b64 = base64(gzip(gson.toJson(payload)))                     │
+│   │     3. execWhenReady(atomic call: vg_clear + vg_setDataGz(b64))    │
 │   │  applyNodeConfig(config): execWhenReady(vg_applyNodeConfig)         │
 │   │  setLayout(algorithm): execWhenReady(vg_setLayout)                  │
 │   │  setLeidenColors(map): execWhenReady(vg_applyLeidenColors)          │
 │   │  notifyViewerReady via BrowserFunction vg_viewerReady               │
-│       │                                                                 │
-│       ▼ HTTP-Request                                                    │
-│  SigmaGraphController  (Spring REST)                                    │
-│   │  GET /api/sigma/nodes?token=X → cached JSON nodes                   │
-│   │  GET /api/sigma/edges?token=X → cached JSON edges                   │
-│   │  ETag: "n-<token>-<count>" / "e-<token>-<count>"                    │
-│   │  If-None-Match → 304 Not Modified                                   │
+│   │                                                                     │
+│   │  Kein REST-Endpoint, kein Per-Session-Cache, kein URL-Inlining.     │
 └─────────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼ HTTP fetch
+                               │
+                               ▼ BrowserScriptQueue.exec (atomic script)
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  JavaScript-Seite (sigma-viewer.html + sigma-viewer.js)                 │
 │                                                                         │
+│  <script src="/sigma/pako.min.js"></script>                             │
 │  <script src="/sigma/graphology.min.js"></script>                       │
 │  <script src="/sigma/graphology-layout.min.js"></script>                │
 │  <script src="/sigma/graphology-layout-forceatlas2.min.js"></script>    │
@@ -73,7 +67,9 @@ Die Engine ist auf zwei Designziele hin optimiert:
 │      var renderer = createRenderer(container, graph);                   │
 │      //  ↳ Sigma-WebGL wenn verfügbar, sonst CanvasRenderer-Fallback    │
 │      attachRendererEvents(renderer);  // unified API                    │
-│      applyElementsAndLayout();        // fetch + layout                 │
+│      // Initial-Load: window.vg_setDataGz(b64) wird vom Java-Bridge     │
+│      // gefeuert sobald der iframe bereit ist (execWhenReady) und die   │
+│      // Daten landen via pako.ungzip → JSON.parse → rebuildGraph.       │
 │      notifyViewerReady();                                               │
 │  })();                                                                  │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -83,96 +79,80 @@ Die Engine ist auf zwei Designziele hin optimiert:
 
 ## 2. Datenlieferung — REST-Endpoint-Architektur
 
-### 2.1 Warum REST statt `BrowserFunction.exec()`?
+### 2.1 Datenlieferung — Bridge-Push mit gzip + base64
 
-Vis (`vgv_*`) und Cytoscape (`cgv_*`) schieben die Elemente via
-`BrowserScriptQueue.exec()` in den iframe. Diese Pipeline ist single-threaded
-und blockiert die UI-Thread bei großen Payloads. Sigma-Graphen mit
->10 000 Edges (z.B. `export (4).csv` 1 010 Edges, größerer Datensatz
-50 000 Edges) treiben diese Pipeline in einen spürbaren UI-Thread-Block.
-
-Die Sigma-Pipeline delegiert an HTTP:
+Wie Vis (`vgv_*`) und Cytoscape (`cgv_*`) schiebt Sigma seine Daten via
+`BrowserScriptQueue.exec()` in den iframe — allerdings **gzip-komprimiert und
+base64-kodiert**, damit auch sehr große Graphen (50 000+ Edges) in einem
+einzigen Skript-Aufruf transportiert werden können.
 
 | Schritt | Verantwortlich | Was passiert |
 |--------|-----------------|---------------|
-| 1 | Java `applyData` | UUID-Token generieren, Daten in `SigmaGraphCache` legen, `execWhenReady` triggert fetch im iframe |
-| 2 | Browser | `fetch("/api/sigma/nodes?token=…&v=N")` + `fetch("/api/sigma/edges?token=…&v=N")` parallel |
-| 3 | Spring `SigmaGraphController` | Lookup im `SigmaGraphCache`, JSON serialisieren, GZIP, ETag setzen |
-| 4 | Browser | `graph.addNode`/`graph.addEdgeWithKey` für jedes Element, dann `runLayout(currentLayout)`, dann `renderer.refresh()` |
+| 1 | Java `applyData` | `payload = data.toGraphologyElements(currentNodeConfig)`, `json = gson.toJson(payload)`, `b64 = base64(gzip(json))` |
+| 2 | Bridge | `execWhenReady("if (window.vg_clear) ...; if (window.vg_setDataGz) window.vg_setDataGz('<b64>')")` — atomic |
+| 3 | Browser (iframe) | `atob(b64)` → `Uint8Array` → `pako.ungzip(bytes, {toText:true})` → `JSON.parse` → `rebuildGraph(...)` |
+| 4 | Browser | `runLayout(currentLayout)` + `renderer.refresh()` |
 
-**Vorteile:**
-- GZIP komprimiert 1 010-Edge-JSON (~30 KB) auf ~5 KB
-- `If-None-Match` Round-trips sparen den Re-Transfer bei Layout-Wechseln
-- HTTP-Stack nutzt Standard-Caching-Header, ServiceWorker-kompatibel
-- REST-Endpoint ist ohne RAP-Bootstrap testbar (`@WebMvcTest`)
+**Vorteile gegenüber REST:**
+- Kein zweiter Thread-Pool, kein Servlet-Container-Roundtrip — alles
+  läuft auf dem RAP-UI-Thread wie der Rest der Bridge
+- Kein Per-Session-Cache, kein Token-Management, kein URL-Inlining in
+  das iframe-HTML
+- `execWhenReady` löst das Initial-Load-Race-Problem ohne inline-URLs
+- `application.yml:server.compression` ist irrelevant für Sigma (Kompression
+  passiert vor `Browser.execute(...)` auf der Java-Seite)
 
-### 2.2 Token-basierte Sicherheit
+**Trade-offs:**
+- Größere Inline-Skripte als ein Cytoscape-/vis-Push: ~30 KB Roh-JSON werden
+  zu ~5 KB gzip + ~7 KB base64 → ca. Faktor 4 kleiner als das Roh-JSON,
+  aber immer noch im einstelligen Kilobyte-Bereich für realistische
+  Dependency-Graphen
+- Die base64-Kodierung fügt ~33 % Overhead hinzu (unvermeidbar — die
+  `Browser.execute(...)`-API nimmt nur JavaScript-Strings)
+- Bei extrem großen Graphen (> 1 MB gzip-Output) stößt man an die
+  String-Länge-Limits einzelner Browser — kann später durch Chunking
+  abgemildert werden (mehrere `vg_setDataGzPartial`-Aufrufe)
 
-```java
-public void applyData(GraphData data) {
-    String token = UUID.randomUUID().toString();
-    SigmaGraphCache.put(currentHttpSessionId(), token, data);
-    // Der Token wird im iframe-HTML inlineiert — kein URL-Discovery nötig.
-    String url1 = "/api/sigma/nodes?token=" + token + "&v=" + data.getNodes().size();
-    String url2 = "/api/sigma/edges?token=" + token + "&v=" + data.getRelationships().size();
-    execWhenReady("if (window.vg_clear) { window.vg_clear(); } "
-            + "if (window.vg_loadGraph) { window.vg_loadGraph("
-            + gson.toJson(url1) + ", " + gson.toJson(url2) + "); }");
-}
-```
+### 2.2 Warum gzip + base64?
 
-Der Token ist eine `UUID v4` (122 bit Entropie). Same-Origin-Policy + RAP-Iframe
-machen URL-Discovery unpraktikabel. Token-Supplier pro `applyData` macht
-gestohlene Token-Wiederverwendung nutzlos.
+Reine JSON-`exec()`-Aufrufe wie bei Cytoscape/vis werden bei großen
+Graphen schnell ineffizient:
 
-### 2.3 Initial-URL-Inlining (Race-freier Boot)
+- 30 KB Roh-JSON (1 010 Edges) → **30 KB Skript-String** im Browser
+- 1 MB Roh-JSON (≈ 50 000 Edges) → **1 MB Skript-String** → kann je nach
+  Browser an String-Länge-Limits stoßen
 
-`SigmaViewer` ersetzt im HTML-Template die Platzhalter
-`__VG_INITIAL_NODES_URL__` und `__VG_INITIAL_EDGES_URL__` durch die
-konkreten Token-URLs **bevor** `Browser.setText()` aufgerufen wird:
+Mit gzip:
 
-```java
-String[] urls = bridge.computeInitialUrls();
-html = html.replace(PLACEHOLDER_NODES_URL, urls[0]);
-html = html.replace(PLACEHOLDER_EDGES_URL, urls[1]);
-setText(html);
-```
+- 30 KB Roh-JSON → 5 KB gzip → 7 KB base64 (Faktor ~4 kleiner)
+- 1 MB Roh-JSON → 200 KB gzip → 270 KB base64 (Faktor ~4 kleiner)
+- Kompressionsrate ist gut, weil Labels, Farben und Node-ID-Präfixe
+  stark wiederholen
 
-Das eliminiert die Race zwischen iframe-Boot und Java-Push: das iframe kann
-sofort beim Boot fetchen, ohne auf `vg_viewerReady` zu warten.
+`pako` wird nur für die Decompression gebraucht (`pako_inflate.umd.min.js`),
+ist ~32 KB und läuft komplett im iframe (kein Build-Pipeline-Eingriff —
+lokales npm-pack und 1:1-Kopie nach `static/sigma/pako.min.js`).
 
-### 2.4 Cache-Cleanup
+### 2.3 Initial-Load ohne Race
 
-`SigmaGraphCache` (process-lokaler `ConcurrentHashMap<String, Entry>`) hat zwei
-Cleanup-Pfade:
+`SigmaViewer.applyData(initialData)` wird im Konstruktor **vor** `setText(html)`
+aufgerufen. Der Aufruf landet in `execWhenReady(...)`, queued also bis
+`vg_viewerReady` feuert, und wird dann als allererster Push an den iframe
+geschickt. Kein URL-Inlining, kein zusätzlicher Boot-Mechanismus nötig — der
+existierende Ready-Handshake der Bridge deckt das vollständig ab.
 
-1. **Session-aware (kanonisch):** `SigmaJsBridge.applyData` registriert einen
-   `UISessionListener.beforeDestroy`, der bei Session-Ende
-   `SigmaGraphCache.evictSession(httpSessionId)` aufruft.
-2. **Time-aware (defensiv):** Daemon-Thread sweeped alle 5 min und löscht
-   Einträge älter als `MAX_AGE_MINUTES = 30` Minuten.
+### 2.4 Was im Vergleich zum vorherigen REST-Design weggefallen ist
 
-**Wichtig:** Der Cache-Key ist `HttpSession.getId()`, **nicht** `UISession.getId()`.
-REST-Threads dürfen nicht `RWT.getUISession()` aufrufen (wirft
-`InvalidThreadAccess`), aber `HttpSession` ist aus beiden Threads erreichbar.
+- `SigmaGraphCache` (process-lokaler Cache + Daemon-Evictor): gelöscht
+- `SigmaGraphController` (`@RestController` für `/api/sigma/nodes` + `/edges`): gelöscht
+- `UISessionListener`-Hook in `SigmaJsBridge`: gelöscht
+- Token-Generierung (`UUID.randomUUID()`): gelöscht
+- URL-Inlining in `SigmaViewer`-Konstruktor: gelöscht
+- `__VG_INITIAL_NODES_URL__` / `__VG_INITIAL_EDGES_URL__` HTML-Platzhalter: gelöscht
+- `fetch(...)` + `If-None-Match` + `ETag` in `sigma-viewer.js`: gelöscht
 
-### 2.5 GZIP + ETag
-
-`application.yml`:
-
-```yaml
-server:
-  compression:
-    enabled: true
-    mime-types: application/json,application/xml,text/html,text/plain
-    min-response-size: 1024
-```
-
-`SigmaGraphController` setzt zusätzlich `ETag: "n-<token>-<count>"` /
-`"e-<token>-<count>"`. Layout-Wechsel (die nichts am Payload ändern) lösen
-einen `If-None-Match`-Roundtrip aus; der Server antwortet mit `304 Not Modified`
-und der Browser behält den bereits geparsten Body. Gemessen am 1 010-Edge-Graph
-spart das pro Layout-Wechsel ~30 KB Download.
+Verbleibend: `BrowserScriptQueue.exec(...)` mit `gzipAndBase64(json)` als
+Helper und `pako.ungzip(...)` im iframe.
 
 ---
 
@@ -471,46 +451,27 @@ Kanten-Threshold `size + 4` (jeweils in Graph-Units, geteilt durch `scale`).
 
 ---
 
-## 7. URL-Endpoints (`SigmaGraphController`)
+## 7. Test-Status
 
-```
-GET /api/sigma/nodes?token=<uuid>&v=<int>   → 200 / 304
-GET /api/sigma/edges?token=<uuid>&v=<int>   → 200 / 304
-```
+### 7.1 Java-Tests
 
-**Header-Vertrag:**
+- **`SigmaJsBridgeGzipTest`** (4 Tests): gzip+base64 round-trip für ASCII,
+  graphology-Payload, UTF-8 (inkl. Emoji), leerer String. Compression-Ratio-Sanity.
+- **`SigmaJsBridgeSourceTest`** (3 Tests): atomarer `exec`-Aufruf,
+  `gzipAndBase64`-Sichtbarkeit, keine REST-Referenzen (Cache, Controller,
+  UISessionListener, `__VG_INITIAL_*`, `/api/sigma`).
+- **`SigmaViewerJsSourceTest`** (15 Tests): Source-Guard für `hasWebGL`,
+  `createRenderer`, `CanvasRenderer.prototype.*`, Selection-Events,
+  `addEdgeWithKey`, `runForceDirected2`, Error-Handling, **Bridge-Push via
+  `vg_setDataGz` + `pako.ungzip`**, **HTML lädt `pako.min.js` vor
+  `sigma-viewer.js`** und enthält keine `__VG_INITIAL_*`-Platzhalter mehr,
+  **pako-Bundle ist vorhanden**.
+- **`GraphDataGraphologyElementsTest`** (3 Tests): Node-/Edge-Attribute,
+  Missing-Weight-Handling.
+- **`LayoutAlgorithmSigmaTest`** (3 Tests): `isSupportedBySigma()` für alle
+  Werte, `valuesForSigma()` Reihenfolge.
 
-| Response-Header | Wert |
-|-----------------|------|
-| `Content-Encoding` | `gzip` (für Bodies > 1024 Bytes) |
-| `ETag` | `"n-<token>-<count>"` (nodes) bzw. `"e-<token>-<count>"` (edges) |
-| `Cache-Control` | `no-cache, private` |
-| `Vary` | `Accept-Encoding` |
-
-**Request-Header:**
-
-| Request-Header | Wirkung |
-|----------------|---------|
-| `If-None-Match: "n-<token>-<count>"` | Server antwortet `304 Not Modified` ohne Body |
-
-**Status-Codes:**
-- `200 OK` — Payload (gzipped JSON)
-- `304 Not Modified` — Payload unverändert seit letztem Fetch
-- `404 Not Found` — Token unbekannt, abgelaufen oder Session-übergreifend
-
----
-
-## 8. Test-Status
-
-### 8.1 Java-Tests (278 grün)
-
-- **`SigmaGraphCacheTest`** (5 Tests): put/get/evictSession/evictStale/null-Argumente
-- **`SigmaGraphControllerTest`** (5 Tests): 200/304/404 für Nodes + Edges, 200 nach Eviction
-- **`GraphDataGraphologyElementsTest`** (3 Tests): Node-/Edge-Attribute, Missing-Weight-Handling
-- **`LayoutAlgorithmSigmaTest`** (3 Tests): `isSupportedBySigma()` für alle Werte, `valuesForSigma()` Reihenfolge
-- **`SigmaViewerJsSourceTest`** (11 Tests): Source-Guard für `hasWebGL`, `createRenderer`, `CanvasRenderer.prototype.*`, Selection-Events, `addEdgeWithKey`, `runForceDirected2`, Error-Handling
-
-Plus die existierenden 251 Tests ohne Regression.
+Plus die existierenden Tests ohne Regression.
 
 ### 8.2 Chrome-Browser-Verifikation (manuell)
 
@@ -551,34 +512,34 @@ src/main/
 │   │   ├── GraphNode.java                            # +toGraphologyNode(NodeConfig)
 │   │   └── GraphRelationship.java                    # +toGraphologyEdge()
 │   ├── api/
-│   │   ├── SigmaGraphController.java                # GET /api/sigma/{nodes,edges}
-│   │   ├── SigmaGraphCache.java                     # process-lokaler Cache + Daemon-Evictor
 │   │   └── NodeConfigRegistry.java                   # per-Session NodeConfig-Lookup
-│   ├── SigmaViewer.java                             # Browser-Widget, URL-Inlining
-│   ├── internal/SigmaJsBridge.java                   # vg_* BrowserFunction-Handler
+│   ├── SigmaViewer.java                             # Browser-Widget, Bridge-Push
+│   ├── internal/SigmaJsBridge.java                   # vg_* BrowserFunction-Handler + gzip+base64-Push
 │   ├── GraphViewerControlBar.java                    # +Engine-Item "Sigma", +Layouts
 │   ├── GraphConfigurationDialog.java                 # +"Sigma engine: no community-agg"
 │   └── SwitchingViewer.java                         # +Sigma-Routing in switchTo/set*
 └── resources/
-    ├── application.yml                              # server.compression.enabled
+    ├── application.yml                              # server.compression.enabled (für GraphUploadController / SampleGraph)
     └── static/
-        ├── sigma-viewer.html                        # __VG_INITIAL_*_URL__ Platzhalter
+        ├── sigma-viewer.html                        # pako.min.js + graphology + sigma-viewer.js
         └── sigma/
+            ├── pako.min.js                           # pako@3.0.2 pako_inflate.umd.min.js (~32 KB)
             ├── graphology.min.js                     # graphology@0.25.4 UMD
             ├── graphology-layout.min.js              # circular + random
             ├── graphology-layout-forceatlas2.min.js  # esbuild-IIFE-Bundle
             ├── graphology-layout-noverlap.min.js      # esbuild-IIFE-Bundle
             ├── sigma.min.js                          # sigma@2.3.1 UMD
-            └── sigma-viewer.js                       # Bridge + Layouts + CanvasRenderer
+            └── sigma-viewer.js                       # Bridge + Layouts + CanvasRenderer + vg_setDataGz
 ```
 
 ```
 src/test/java/.../visgraph/
-├── api/SigmaGraphCacheTest.java                     # 5 Tests
-├── api/SigmaGraphControllerTest.java                # 5 Tests
 ├── data/GraphDataGraphologyElementsTest.java         # 3 Tests
 ├── data/LayoutAlgorithmSigmaTest.java                # 3 Tests
-└── internal/SigmaViewerJsSourceTest.java             # 11 Tests
+└── internal/
+    ├── SigmaJsBridgeGzipTest.java                    # 4 Tests (round-trip + Kompressionsratio)
+    ├── SigmaJsBridgeSourceTest.java                  # 3 Tests (atomic exec, Rest-Refs, gzip-Sichtbarkeit)
+    └── SigmaViewerJsSourceTest.java                  # 15 Tests (Bridge-Push, HTML-Reihenfolge, pako-Bundle, +Canvas/Layout/Selection)
 ```
 
 ---
@@ -604,6 +565,7 @@ src/test/java/.../visgraph/
 | `graphology-layout-forceatlas2` | 0.10.1 | npm: `graphology-layout-forceatlas2@0.10.1` (esbuild-IIFE-Bundle) |
 | `graphology-layout-noverlap` | 0.4.2 | npm: `graphology-layout-noverlap@0.4.2` (esbuild-IIFE-Bundle) |
 | `graphology-utils` | 2.5.2 | npm: `graphology-utils@2.5.2` (Peer von `forceatlas2`) |
+| `pako` | 3.0.2 | npm: `pako@3.0.2` — nur `dist/browser/pako_inflate.umd.min.js` (~32 KB) |
 
 Die UMD-Bundles von `graphology` und `sigma` werden direkt aus den
 NPM-Paketen kopiert. Die Layout-Pakete (forceatlas2, noverlap) sind

@@ -27,26 +27,22 @@ import java.util.logging.Logger;
  * sigma-viewer HTML+JS via {@code Browser.setText} (inline) and exposes
  * Java APIs for data, selection, context menu, and layout configuration.
  *
- * <p>Data delivery differs from the vis-network and Cytoscape counterparts:
- * the graphology payload is fetched by the iframe from
- * {@code /api/sigma/nodes} and {@code /api/sigma/edges} rather than pushed
- * via {@code BrowserFunction}. This keeps the iframe-side memory profile
- * predictable for large graphs and lets the response stream through the
- * standard Servlet stack with GZIP compression.</p>
+ * <p>Data delivery: like the vis-network and Cytoscape counterparts, the
+ * graphology payload is pushed from Java to the iframe via the Rap-JS
+ * bridge. {@link SigmaJsBridge#applyData} serializes the payload,
+ * gzip-compresses and base64-encodes it, then ships the result to
+ * {@code window.vg_setDataGz(b64)}. No REST endpoints, no URL inlining,
+ * no per-session cache.</p>
  *
- * <p>The initial fetch URL is inlined into the iframe HTML before
- * {@code Browser.setText} so the iframe can start fetching as soon as it
- * boots — eliminating the race between the iframe's IIFE and the
- * Java-side {@code applyData(...)} call. If no graph is available at
- * construction time the inlined URLs are empty strings and the iframe
- * waits for the next {@code applyData(...)} call.</p>
+ * <p>If an initial dataset is passed to the constructor,
+ * {@code SigmaJsBridge.applyData(...)} is called BEFORE {@code setText(...)}
+ * so the push is queued via {@code execWhenReady(...)} and fires the
+ * moment the iframe IIFE has run.</p>
  */
 public class SigmaViewer extends Browser {
 
     private static final Logger LOG = Logger.getLogger(SigmaViewer.class.getName());
     private static final String DEFAULT_HTML_RESOURCE = "/static/sigma-viewer.html";
-    private static final String PLACEHOLDER_NODES_URL = "__VG_INITIAL_NODES_URL__";
-    private static final String PLACEHOLDER_EDGES_URL = "__VG_INITIAL_EDGES_URL__";
 
     private final SigmaJsBridge bridge;
     private GraphData currentData;
@@ -74,11 +70,10 @@ public class SigmaViewer extends Browser {
 
     /**
      * Construct a SigmaViewer. {@code initialData}, when non-null, is pushed
-     * to the bridge BEFORE the iframe HTML is rendered so the
-     * {@code __VG_INITIAL_NODES_URL__} / {@code __VG_INITIAL_EDGES_URL__}
-     * placeholders can be inlined with concrete fetch addresses. If null,
-     * the placeholders stay empty and the iframe waits for a later
-     * {@link #setGraphData} call.
+     * to the bridge BEFORE the iframe HTML is rendered so the push is
+     * queued by {@link SigmaJsBridge#execWhenReady} and fires as soon as
+     * the iframe reports {@code vg_viewerReady}. If null, the iframe boots
+     * with an empty graph and waits for a later {@link #setGraphData} call.
      */
     public SigmaViewer(Composite parent, int style, String htmlOrResourcePath, GraphData initialData) {
         super(parent, style);
@@ -86,8 +81,10 @@ public class SigmaViewer extends Browser {
         this.bridge = new SigmaJsBridge(this);
         wireBridgeListeners();
 
-        // Push the initial data to the bridge first so the fetch URLs are
-        // available for HTML inlining.
+        // Push the initial data to the bridge first. The push is queued
+        // via execWhenReady() so it fires once the iframe reports
+        // vg_viewerReady — eliminating the race between the iframe's IIFE
+        // and the Java-side applyData(...) call.
         if (initialData != null && !initialData.getNodes().isEmpty()) {
             bridge.applyData(initialData);
         }
@@ -96,13 +93,6 @@ public class SigmaViewer extends Browser {
         if (html == null) {
             html = this.htmlOrResourcePath;
         }
-        // Inline the initial fetch URLs into the HTML template.
-        String[] urls = bridge.computeInitialUrls();
-        html = html.replace(PLACEHOLDER_NODES_URL,
-                urls != null && urls.length > 0 && urls[0] != null ? urls[0] : "");
-        html = html.replace(PLACEHOLDER_EDGES_URL,
-                urls != null && urls.length > 1 && urls[1] != null ? urls[1] : "");
-
         setText(html);
         // Force the parent composite to recompute its FillLayout now that
         // the Browser child has been added. Without this the iframe can
