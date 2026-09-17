@@ -155,12 +155,12 @@ public class GraphViewerControlBar extends Composite {
         Label lblEngine = new Label(this, SWT.NONE);
         lblEngine.setText("Engine:");
         engineCombo = new Combo(this, SWT.READ_ONLY | SWT.DROP_DOWN);
-        engineCombo.setItems(new String[] { "Cytoscape", "Sigma", "Nvl", "Vis" });
-        if( switching.getEngine() == GraphEngine.CYTOSCAPE ) {
+        engineCombo.setItems(new String[] {  "Nvl", "Cytoscape", "Sigma","Vis" });
+        if( switching.getEngine() == GraphEngine.NEO4J_NVL ) {
             engineCombo.select(0);
-        } else if( switching.getEngine() == GraphEngine.SIGMA ) {
+        } else if( switching.getEngine() == GraphEngine.CYTOSCAPE ) {
             engineCombo.select(1);
-        } else if( switching.getEngine() == GraphEngine.NEO4J_NVL ) {
+        } else if( switching.getEngine() == GraphEngine.SIGMA ) {
             engineCombo.select(2);
         } else {
             engineCombo.select(3);
@@ -168,9 +168,9 @@ public class GraphViewerControlBar extends Composite {
         engineCombo.addSelectionListener(new SelectionAdapter() {
             @Override public void widgetSelected(SelectionEvent e) {
                 int idx = engineCombo.getSelectionIndex();
-                if (idx == 0) switching.switchTo(GraphEngine.CYTOSCAPE);
-                else if (idx == 1) switching.switchTo(GraphEngine.SIGMA);
-                else if (idx == 2) switching.switchTo(GraphEngine.NEO4J_NVL);
+                if (idx == 0) switching.switchTo(GraphEngine.NEO4J_NVL);
+                else if (idx == 1) switching.switchTo(GraphEngine.CYTOSCAPE);
+                else if (idx == 2) switching.switchTo(GraphEngine.SIGMA);
                 else switching.switchTo(GraphEngine.VIS_NETWORK);
             }
         });
@@ -394,11 +394,11 @@ public class GraphViewerControlBar extends Composite {
         autoFitButton.setEnabled(isVis);
         // Reflect the new engine in the engine combo.
         if (engine == GraphEngine.SIGMA) {
-            engineCombo.select(1);
-        } else if (engine == GraphEngine.CYTOSCAPE) {
-            engineCombo.select(0);
-         } else if (engine == GraphEngine.NEO4J_NVL) {
             engineCombo.select(2);
+        } else if (engine == GraphEngine.CYTOSCAPE) {
+            engineCombo.select(1);
+         } else if (engine == GraphEngine.NEO4J_NVL) {
+            engineCombo.select(0);
         } else {
             engineCombo.select(3);
         }
@@ -430,6 +430,9 @@ public class GraphViewerControlBar extends Composite {
         // existing cytoscape fallback chain is preserved).
         for (int i = 0; i < layouts.length; i++) {
             if (layouts[i] == LayoutAlgorithm.FORCE_DIRECTED_2_SIGMA) return i;
+        }
+        for (int i = 0; i < layouts.length; i++) {
+            if (layouts[i] == LayoutAlgorithm.BARNES_HUT) return i;
         }
         for (int i = 0; i < layouts.length; i++) {
             if (layouts[i] == LayoutAlgorithm.FORCE_ATLAS_2D) return i;

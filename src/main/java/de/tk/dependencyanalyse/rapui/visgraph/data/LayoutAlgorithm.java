@@ -37,8 +37,8 @@ package de.tk.dependencyanalyse.rapui.visgraph.data;
  * shows only the layouts it actually understands.</p>
  */
 public enum LayoutAlgorithm {
-    FORCE_ATLAS_2D  (true,  false, false, true),
     BARNES_HUT      (true,  false, false, true),
+    FORCE_ATLAS_2D  (true,  false, false, true),
     REPULSION       (true,  false, false, true),
     HIERARCHICAL_REPULSION(true, false, false, true),
     HIERARCHICAL    (true,  false, false, true),

@@ -42,10 +42,10 @@ public class SwitchingViewer extends Composite {
 
     private GraphData currentData;
     private NodeConfig currentNodeConfig;
-    private LayoutAlgorithm currentLayout = LayoutAlgorithm.FORCE_ATLAS_2D;
+    private LayoutAlgorithm currentLayout = LayoutAlgorithm.BARNES_HUT;
     private Map<String, Object> currentLayoutOptions = Map.of();
     private ContextMenuProvider currentContextMenuProvider;
-    private GraphEngine currentEngine = GraphEngine.CYTOSCAPE;
+    private GraphEngine currentEngine = GraphEngine.NEO4J_NVL;
 
     /** Last Leiden cluster colors pushed via {@link #setLeidenClusterColors}. */
     private Map<String, String> currentLeidenColors = Map.of();
@@ -72,8 +72,9 @@ public class SwitchingViewer extends Composite {
         addListener(SWT.Dispose, disposeListener);
         setLayout(new org.eclipse.swt.layout.FillLayout());
         // Create the initial viewer (vis-network by default).
-        cytoscapeViewer = new CytoscapeViewer(this, SWT.NONE);
-        wireViewer(cytoscapeViewer);
+        //cytoscapeViewer = new CytoscapeViewer(this, SWT.NONE);
+        nvlViewer = new Neo4jNvlViewer(this, SWT.NONE);
+        wireViewer(nvlViewer);
     }
 
     public GraphEngine getEngine() {
@@ -152,8 +153,8 @@ public class SwitchingViewer extends Composite {
             } else {
                 // Previous engine's layout isn't supported by NVL —
                 // fall back to the NVL-friendly default.
-                nvlViewer.setLayout(LayoutAlgorithm.FORCE_ATLAS_2D);
-                this.currentLayout = LayoutAlgorithm.FORCE_ATLAS_2D;
+                nvlViewer.setLayout(LayoutAlgorithm.BARNES_HUT);
+                this.currentLayout = LayoutAlgorithm.BARNES_HUT;
             }
             // Re-apply the Leiden color map on the fresh NVL viewer
             // (previously commented out — caused "Apply Leiden
