@@ -212,61 +212,113 @@ if (filter.type === 'node') {
 
 ### 4.3 NVL (`nvl-graph-viewer.js`)
 
-**Versteck-Mechanismus:** NVL respektiert die `hidden`-Property auf
-Relationships nativ — alle drei Renderer (WebGL, Canvas-2D, SVG) blenden
-den Pfeil + Label komplett aus, sobald `hidden: true` gesetzt ist. Der
-Hit-Test ignoriert versteckte Relationships ebenfalls.
+**Versteck-Mechanismus:** NVL kennt **keine** `hidden`-Property auf
+Relationships — der ursprüngliche Plan, das Ausblenden über
+`{ id, hidden: true }`-Updates an `nvl.updateElementsInGraph` zu lösen,
+funktioniert nicht (NVL akzeptiert das Property im Update, speichert es,
+liest es aber in keinem der drei Renderer-Pfade). Die einzige
+zuverlässige Methode ist, die auszublendenden Relationships aus dem
+Graph zu **entfernen** und bei Bedarf wieder einzufügen.
 
-**Anwendung:** Über `nvl.updateElementsInGraph([], updates)`. Diese Methode
-akzeptiert separate Node- und Relationship-Update-Arrays und ist im
-Vergleich zu `addAndUpdateElementsInGraph` wesentlich effizienter, weil
-keine Positions-Resets getriggert werden.
+**Anwendung:** Über `nvl.removeRelationshipsWithIds(...)` für die
+auszublendenden Rels und `nvl.addAndUpdateElementsInGraph([], [...])` für
+das Wiederherstellen. Dazwischen hält das IIFE ein Backup
+(`hiddenRelBackups`) der ursprünglichen Relationship-Properties, damit
+beim Re-Insert Farbe, Caption, Width und Overlay-Icon erhalten bleiben.
 
-**Helper `applyEdgeFilter`** (`nvl-graph-viewer.js:415`):
+**Helper `applyEdgeFilter`** (Sigma-konform):
 
 ```javascript
 function applyEdgeFilter() {
     if (!nvl || !nvlReady) return;
     var rels = nvl.getRelationships();
-    if (!rels || rels.length === 0) return;
-    var updates = [];
     var ec = currentEffectiveColors || {};
     var lc = currentLeidenColors || {};
+    // 1) Welche Rels sollen aktuell sichtbar sein?
+    var keepSet = {};
     rels.forEach(function (r) {
-        var keep;
-        if (!edgeFilter) {
-            keep = true;
-        } else if (edgeFilter.type === 'node') {
-            keep = (r.from === edgeFilter.nodeId || r.to === edgeFilter.nodeId);
-        } else if (edgeFilter.type === 'cluster') {
-            var fh = (edgeFilter.hex || '').toLowerCase();
-            var sCol = ((ec[r.from] || lc[r.from] || '') + '').toLowerCase();
-            var tCol = ((ec[r.to] || lc[r.to] || '') + '').toLowerCase();
-            keep = (sCol === fh || tCol === fh);
-        }
-        var shouldHide = !keep;
-        if (!!r.hidden !== shouldHide) {
-            updates.push({ id: r.id, hidden: shouldHide });
+        if (computeRelKeep(r, edgeFilter, ec, lc)) keepSet[r.id] = true;
+    });
+    // 2) Backup-Pool nachziehen (Rels, die gerade ausgeblendet sind
+    //    und laut Filter wieder sichtbar sein sollen).
+    var restoreIds = [];
+    Object.keys(hiddenRelBackups).forEach(function (id) {
+        if (computeRelKeep(hiddenRelBackups[id], edgeFilter, ec, lc)) {
+            restoreIds.push(id);
         }
     });
-    if (updates.length > 0) {
-        nvl.updateElementsInGraph([], updates);
+    // 3) Sichtbare Rels, die laut Filter weg sollen → Backup + remove.
+    var removeIds = [];
+    rels.forEach(function (r) {
+        if (!keepSet[r.id] && !hiddenRelBackups[r.id]) {
+            removeIds.push(r.id);
+            hiddenRelBackups[r.id] = cloneRelProps(r);
+        }
+    });
+    if (removeIds.length > 0) {
+        try { nvl.removeRelationshipsWithIds(removeIds); } catch (e) { ... }
+    }
+    if (restoreIds.length > 0) {
+        var toRestore = restoreIds.map(function (id) { return hiddenRelBackups[id]; });
+        try { nvl.addAndUpdateElementsInGraph([], toRestore); } catch (e) { ... }
+        restoreIds.forEach(function (id) { delete hiddenRelBackups[id]; });
     }
 }
 ```
 
-**Optimierung:** Es werden nur Updates an NVL gepusht, deren `hidden`
-sich tatsächlich ändert (`!!r.hidden !== shouldHide`). Damit vermeidet
-der Helper einen vollständigen Re-Paint, wenn der User z. B. eine andere
-Node anklickt und nur ein paar Edges ihren Status wechseln.
+`computeRelKeep(rel, filter, ec, lc)` entspricht der Sigma-Logik
+(`sigma-viewer.js:601-616`): `null` ⇒ immer sichtbar; `type:'node'` ⇒
+Source oder Target ist die selektierte Node; `type:'cluster'` ⇒
+Source- oder Target-Farbe matcht die Cluster-Hex (effective oder
+Leiden). Das Ergebnis ist dieselbe Filter-Semantik wie bei Cytoscape
+(`cgv-edge-hidden`-Klasse) und Sigma (`filterFn`-Skip in `_render`).
+
+**Trade-off:** `addAndUpdateElementsInGraph` triggert im Gegensatz zu
+`updateElementsInGraph` einen kurzen Render-Pulse, weil die Rels neu
+in den internen Graph-State eingefügt werden. Bei großen Graphen
+(> 10k Rels) kann ein mehrfacher Filter-Wechsel messbar Reflows
+verursachen — das ist die einzige Möglichkeit, die der NVL-Bundle
+(Stand `nvl-bundle.js`) hergibt, weil er keine `hidden`-Property
+unterstützt.
+
+**Cluster-Edges und Bridge-Edges:** bleiben sichtbar. Die Farbe jedes
+Edges wird beim Aktivieren des Filters auf die Farbe der
+**Quell-Node** gesetzt (`applyEdgeColors` in
+`nvl-graph-viewer.js:507-540`) — Sigma-konform zu
+`sigma-viewer.js:1653-1672` (`buildEdgeReducer`) und Cytoscape-konform
+zu `cytoscape-viewer.js:2666-2667` (`data(sourceCommunityColor)`).
+Cluster-Edges tragen damit die Cluster-Farbe der Source-Node; Bridges
+behalten die Farbe ihrer (externen) Source-Node. Lookup-Reihenfolge:
+`currentEffectiveColors[rel.from]` → `currentLeidenColors[rel.from]`
+→ Default-Farbe aus dem Edge-Property.
+
+**Node-Sichtbarkeit:** NVL blendet zusätzlich zu den Edges auch die
+nicht-zugehörigen Nodes aus (`applyNodeFilter` in
+`nvl-graph-viewer.js:662-725`). Beim Node-Click bleiben nur die
+geklickte Node + ihre 1-Hop-Nachbarn sichtbar; beim Cluster-Click
+bleiben Cluster-Members + Brücken-Nodes sichtbar. Das gleiche
+Remove/Re-Insert-Pattern wie beim Edge-Filter kommt zum Einsatz;
+`hiddenNodeBackups` ist das Node-Pendant zu `hiddenRelBackups`. Nach
+dem Re-Insert werden die ursprünglichen Layout-Positionen per
+`nvl.setNodePositions(..., false)` wiederhergestellt, damit die
+sichtbar werdenden Nodes nicht "springen". Reihenfolge im Restore-Pfad:
+erst Nodes (`applyNodeFilter`), dann Edges — sonst wirft
+`nvl.addAndUpdateElementsInGraph` einen Validierungsfehler wegen
+fehlender Endpoint-Nodes.
+
+**Node-Highlighting:** Beim Node-Click wird `selected: true` per
+`nvl.updateElementsInGraph` auf die geklickte Node gesetzt (NVL zeichnet
+dann nativ einen Border). Ein Cluster-Dimm auf nicht-gematchte Nodes
+ist nicht mehr nötig, weil diese Nodes durch `applyNodeFilter` ohnehin
+aus dem Graph entfernt werden.
 
 **Anwendung:**
-- `onNodeClick` (`nvl-graph-viewer.js:208`) — Toggle auf gleicher
+- `onNodeClick` (`nvl-graph-viewer.js:251`) — Toggle auf gleicher
   `nodeId`, sonst ersetzen.
-- `onRelationshipClick` (`nvl-graph-viewer.js:218`) — Filter wird
+- `onRelationshipClick` (`nvl-graph-viewer.js:271`) — Filter wird
   aufgehoben.
-- `onCanvasClick` (`nvl-graph-viewer.js:226`) — Filter wird aufgehoben.
-- Palette-Row-Click (`nvl-graph-viewer.js:836`) — Cluster-Filter mit
+- `onCanvasClick` (`nvl-graph-viewer.js:293`) — Filter wird aufgehoben.
+- Palette-Row-Click (`nvl-graph-viewer.js:1276`) — Cluster-Filter mit
   Toggle auf gleicher Hex-Farbe.
 
 **Reset:** `vgv_clear` (`nvl-graph-viewer.js:540`), `vgv_hideColorPalette`

@@ -1412,27 +1412,29 @@
 
     /**
      * Highlight the selected node + its 1-hop neighbours and the
-     * connecting edges. All other elements are dimmed. The selected
-     * node's Leiden color is preserved — only its border is highlighted
-     * (the border-width / border-color in node:selected style does
-     * that automatically via the `node:selected` selector).
+     * connecting edges. The selected node's Leiden color is preserved
+     * — only its border is highlighted (the border-width / border-color
+     * in node:selected style does that automatically via the
+     * `node:selected` selector). Other nodes are NOT dimmed — Sigma
+     * parity: a single-node click leaves the canvas unchanged outside
+     * of the edge-filter. Cluster (Palette) clicks keep the dim
+     * because that path uses applyLegendHighlight which has its own
+     * cgv-faded push for unmatched nodes.
      */
     function highlightNeighborhood(cy, node) {
         if (!cy || !node) return;
         clearNeighborhoodHighlight(cy);
         if (!node.neighborhood) return;
         var hood = node.neighborhood().add(node);
-        var others = cy.elements().difference(hood);
-        // Edge-Filter: alle Edges, die nicht zur 1-Hop-Umgebung der
-        // selektierten Node gehören, komplett ausblenden. Der Node-State
-        // (Selektion + Dim) bleibt unverändert; nur die Edges werden
-        // zusätzlich hart versteckt statt nur gedimmt.
+        // Edge-Filter: nur die Edges, die nicht zur 1-Hop-Umgebung der
+        // selektierten Node gehören, komplett ausblenden. Kein Node-Dimm
+        // (Sigma-konform — siehe clearNeighborhoodHighlight, das den
+        // cgv-faded-Klassenrest aufräumt).
         edgeFilter = { type: 'node', nodeId: node.id() };
         var hoodEdges = hood.edges();
         cy.batch(function () {
             var nonHoodEdges = cy.edges().not(hoodEdges);
             if (nonHoodEdges.length > 0) nonHoodEdges.addClass('cgv-edge-hidden');
-            if (others.length > 0) others.addClass('cgv-faded');
         });
     }
 
@@ -1618,19 +1620,17 @@
             cy.edges().forEach(function (e) {
                 var sId = e.source().id();
                 var tId = e.target().id();
-                if (matchedSet[sId] && matchedSet[tId]) {
-                    e.removeClass('cgv-faded');
-                    e.removeClass('cgv-edge-hidden');
-                    e.style({
-                        'line-color': hex,
-                        'target-arrow-color': hex,
-                        'opacity': 1
-                    });
-                } else if (matchedSet[sId] || matchedSet[tId]) {
-                    // Bridge-Edge (genau ein Endpoint im Cluster): auch
-                    // sichtbar lassen, aber mit normaler (grauer) Linie,
-                    // damit der User sofort sieht, dass die andere Seite
-                    // außerhalb des Clusters liegt.
+                // Edge-Sichtbarkeit nach EdgeFilter-MD §2.2:
+                //   - Intra-Cluster (beide Endpoints im Cluster): sichtbar
+                //   - Bridge-Cluster (genau ein Endpoint): sichtbar
+                //   - extern→extern: ausgeblendet
+                // Die Cluster-Farbe wird NICHT mehr auf Intra-Edges
+                // gesetzt — Sigma-konform (siehe sigma-viewer.js
+                // _render:625 ff.): die Edges behalten ihre Default-
+                // Farbe aus dem Stylesheet. Wer im Cluster ist, sieht
+                // der User an den Nodes (Border) und am Node-Dimm der
+                // externen Nodes.
+                if (matchedSet[sId] || matchedSet[tId]) {
                     e.removeClass('cgv-edge-hidden');
                 } else {
                     e.addClass('cgv-edge-hidden');
@@ -1700,7 +1700,7 @@
         cy.batch(function () {
             cy.elements()
                 .removeClass('cgv-faded cgv-edge-hidden')
-                .removeStyle('border-width border-color border-style line-color target-arrow-color');
+                .removeStyle('border-width border-color border-style');
         });
     }
 

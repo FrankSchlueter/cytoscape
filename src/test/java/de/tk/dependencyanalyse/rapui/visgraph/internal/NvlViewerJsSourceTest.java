@@ -177,4 +177,138 @@ class NvlViewerJsSourceTest {
                         + "after boot — the Zoom handler must be constructed "
                         + "and stay constructed");
     }
+
+    /**
+     * Edge-Farbe aus Quell-Node. Die Funktion {@code applyEdgeColors}
+     * muss vorhanden sein, den Source-Node-Lookup ({@code r.from})
+     * verwenden und das NVL-Update-API mit color-Updates ansprechen.
+     * Sigma-konform zu {@code sigma-viewer.js:1653-1672}.
+     */
+    @Test
+    void applyEdgeColorsIsImplemented() throws Exception {
+        String src = readViewerJs();
+        assertTrue(src.contains("function applyEdgeColors"),
+                "nvl-graph-viewer.js must define applyEdgeColors()");
+        assertTrue(src.contains("r.from"),
+                "applyEdgeColors must use r.from as the source-node lookup key");
+        assertTrue(src.contains("currentEffectiveColors"),
+                "applyEdgeColors must consult currentEffectiveColors (resolver map pushed by vgv_applyNodeColors)");
+        assertTrue(src.contains("currentLeidenColors"),
+                "applyEdgeColors must fall back to currentLeidenColors when the resolver map is silent");
+        // Diff-basiert: nur color-Unterschiede werden gepusht.
+        assertTrue(src.contains("nvl.updateElementsInGraph([], updates)")
+                        || src.contains("nvl.updateElementsInGraph( [], updates )"),
+                "applyEdgeColors must call nvl.updateElementsInGraph with the color-diff updates");
+    }
+
+    /**
+     * Apply-Node-Colors / Apply-Leiden-Colors müssen über den
+     * geteilten {@code updateNodeColors}-Helper indirekt
+     * {@code applyEdgeColors} triggern, damit eine Farbänderung an
+     * einer Source-Node unmittelbar auf die auslaufenden Edges
+     * propagiert.
+     */
+    @Test
+    void applyEdgeColorsCalledFromColorUpdateHandlers() throws Exception {
+        String src = readViewerJs();
+        int idxHelper = src.indexOf("function updateNodeColors");
+        assertTrue(idxHelper > 0,
+                "nvl-graph-viewer.js must define updateNodeColors()");
+        // Body bis zum nächsten Top-Level-Tokens '"function ' einsammeln —
+        // verhindert, dass ein inneres '}' den Body zu früh abschneidet.
+        int endHelper = src.indexOf("\n    function ", idxHelper + 10);
+        if (endHelper < 0) endHelper = src.length();
+        String helperBody = src.substring(idxHelper, endHelper);
+        assertTrue(helperBody.contains("applyEdgeColors"),
+                "updateNodeColors must trigger applyEdgeColors so edge colors "
+                        + "follow source-node effective-color updates (this is the "
+                        + "shared path used by vgv_applyNodeColors and vgv_applyLeidenColors)");
+    }
+
+    /**
+     * Node-Sichtbarkeits-Filter. Die Funktion {@code applyNodeFilter}
+     * muss vorhanden sein, das Node-Hidden-Backup
+     * ({@code hiddenNodeBackups}) verwalten und das NVL-Node-API
+     * ({@code removeNodesWithIds}, {@code addAndUpdateElementsInGraph},
+     * {@code setNodePositions}) für das Remove/Re-Insert-Pattern
+     * ansprechen — analog zum bestehenden Edge-Filter-Pattern.
+     */
+    @Test
+    void applyNodeFilterIsImplemented() throws Exception {
+        String src = readViewerJs();
+        assertTrue(src.contains("function applyNodeFilter"),
+                "nvl-graph-viewer.js must define applyNodeFilter()");
+        assertTrue(src.contains("var hiddenNodeBackups"),
+                "nvl-graph-viewer.js must declare hiddenNodeBackups "
+                        + "(the per-node analog of hiddenRelBackups)");
+        assertTrue(src.contains("nvl.removeNodesWithIds"),
+                "applyNodeFilter must call nvl.removeNodesWithIds to hide "
+                        + "out-of-filter nodes (NVL has no per-node hidden property)");
+        assertTrue(src.contains("nvl.addAndUpdateElementsInGraph(restoreNodes, [])")
+                        || src.contains("nvl.addAndUpdateElementsInGraph( restoreNodes, [] )"),
+                "applyNodeFilter must re-insert restored nodes via "
+                        + "nvl.addAndUpdateElementsInGraph");
+        assertTrue(src.contains("nvl.setNodePositions"),
+                "applyNodeFilter must call nvl.setNodePositions to restore "
+                        + "the original layout slot after re-insert");
+        // Apply-Edge-Filter triggert den Node-Filter am Ende. Body bis
+        // zur nächsten Top-Level-function-Deklaration einsammeln.
+        int idx = src.indexOf("function applyEdgeFilter");
+        int end = src.indexOf("\n    function ", idx + 10);
+        if (end < 0) end = src.length();
+        String body = src.substring(idx, end);
+        assertTrue(body.contains("applyNodeFilter()"),
+                "applyEdgeFilter must call applyNodeFilter() at the end so "
+                        + "node visibility follows edge-filter changes");
+    }
+
+    /**
+     * HiddenNodeBackups muss in den Graph-Reset-Pfaden geleert
+     * werden, damit kein verwaistes Backup gegen den nächsten
+     * Datenaufbau läuft.
+     */
+    @Test
+    void hiddenNodeBackupsResetOnDataRefresh() throws Exception {
+        String src = readViewerJs();
+        int idxSetData = src.indexOf("function setDataInternal");
+        int endSetData = src.indexOf("\n    function ", idxSetData + 10);
+        if (endSetData < 0) endSetData = src.length();
+        String setDataBody = src.substring(idxSetData, endSetData);
+        assertTrue(setDataBody.contains("hiddenNodeBackups = {}"),
+                "setDataInternal must reset hiddenNodeBackups when replacing "
+                        + "the graph (otherwise backups dangle against stale node IDs)");
+        int idxClear = src.indexOf("window.vgv_clear = function");
+        int endClear = src.indexOf("\n    window.", idxClear + 10);
+        if (endClear < 0) endClear = src.length();
+        String clearBody = src.substring(idxClear, endClear);
+        assertTrue(clearBody.contains("hiddenNodeBackups = {}"),
+                "vgv_clear must reset hiddenNodeBackups so the next "
+                        + "graph load starts with an empty backup pool");
+    }
+
+    /**
+     * computeKeptNodeIds berücksichtigt sowohl
+     * {@code currentEffectiveColors} (Resolver-Map) als auch
+     * {@code currentLeidenColors} (Leiden-Fallback) beim
+     * Cluster-Match — sonst würden Tag-color-only Nodes vom
+     * Cluster-Filter ausgeschlossen.
+     */
+    @Test
+    void computeKeptNodeIdsHandlesBothColorMaps() throws Exception {
+        String src = readViewerJs();
+        assertTrue(src.contains("function computeKeptNodeIds"),
+                "nvl-graph-viewer.js must define computeKeptNodeIds()");
+        int idx = src.indexOf("function computeKeptNodeIds");
+        int end = src.indexOf("\n    }\n", idx);
+        String body = src.substring(idx, end);
+        assertTrue(body.contains("currentEffectiveColors")
+                        || body.contains("ec"),
+                "computeKeptNodeIds must consult the resolver / effective map");
+        assertTrue(body.contains("currentLeidenColors")
+                        || body.contains("lc"),
+                "computeKeptNodeIds must consult the Leiden fallback map");
+        // Cluster-Pfad muss Brücken-Edges berücksichtigen.
+        assertTrue(body.contains("type === 'cluster'") || body.contains("type == 'cluster'"),
+                "computeKeptNodeIds must implement the cluster branch");
+    }
 }
