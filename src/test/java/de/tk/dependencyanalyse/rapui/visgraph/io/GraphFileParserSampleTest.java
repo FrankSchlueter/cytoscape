@@ -57,6 +57,62 @@ class GraphFileParserSampleTest {
         }
     }
 
+    /**
+     * End-to-end setup check for the NVL "edges take source-node color"
+     * feature. {@code Einstufungsverlauf.gml} carries a {@code color}
+     * attribute on its nodes but on none of its edges — so when the
+     * parser is fed this file, {@code GraphNode.setColor(...)} fires
+     * for every node that has a color and no
+     * {@code GraphRelationship.setColor(...)} is ever invoked. The
+     * downstream contract is that the NVL bridge applies that node
+     * color to every outgoing edge (see {@code applyEdgeColors} in
+     * {@code nvl-graph-viewer.js}). This test pins down the input
+     * side of that contract: the GML must produce a graph where
+     * nodes carry their GML colors and relationships carry none.
+     */
+    @Test
+    void einstufungsverlaufNodesCarryColorsEdgesDoNot() throws Exception {
+        Path p = samplePath("Einstufungsverlauf.gml");
+        if (p == null) {
+            System.err.println("Einstufungsverlauf.gml not on classpath; skipping");
+            return;
+        }
+        try (InputStream in = Files.newInputStream(p)) {
+            GraphData data = GraphFileParser.parse(in, GraphFileParser.Format.GML);
+            assertTrue(data.getNodes().size() > 0, "expected > 0 nodes");
+            assertTrue(data.getRelationships().size() > 0, "expected > 0 edges");
+
+            // Mindestens eine Reihe Knoten muss eine Farbe tragen — sonst
+            // wäre der Test trivial und würde die Source-Farbe-Kette nicht
+            // auslösen. Wir inspizieren die NVL-Serialisierung, weil die
+            // internen visualAttrs privat sind und `toNvlNode` genau die
+            // Form erzeugt, die der NVL-Bridge übergeben wird.
+            int nodesWithColor = 0;
+            for (GraphNode n : data.getNodes()) {
+                Object c = n.toNvlNode().get("color");
+                if (c != null && !String.valueOf(c).isEmpty()) nodesWithColor++;
+            }
+            assertTrue(nodesWithColor >= 2,
+                    "Einstufungsverlauf.gml should yield several nodes with "
+                            + "a non-empty color attribute (so the source-color "
+                            + "chain has something to propagate); got " + nodesWithColor);
+
+            // Keine einzige Relationship darf eine eigene Farbe tragen —
+            // genau das ist die Vorbedingung dafür, dass die Edges
+            // ausschließlich von der Source-Farbe abhängen.
+            int relsWithColor = 0;
+            for (GraphRelationship r : data.getRelationships()) {
+                Object c = r.toNvlData().get("color");
+                if (c != null && !String.valueOf(c).isEmpty()) relsWithColor++;
+            }
+            assertEquals(0, relsWithColor,
+                    "Einstufungsverlauf.gml must not carry edge colors — the "
+                            + "NVL bridge derives edge colors from the source node "
+                            + "via applyEdgeColors(). Found " + relsWithColor
+                            + " relationships with an explicit color attribute.");
+        }
+    }
+
     private static Path samplePath(String name) {
         String[] tries = {
                 "target/classes/sample/" + name,

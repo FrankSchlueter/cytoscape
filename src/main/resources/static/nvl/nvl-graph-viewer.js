@@ -499,8 +499,20 @@
 
     /**
      * Setzt die Farbe jedes Relationships auf die Farbe der Quell-Node.
-     * Lookup-Reihenfolge: {@code currentEffectiveColors[rel.from]} →
-     * {@code currentLeidenColors[rel.from]} → unverändert (default).
+     * Lookup-Reihenfolge:
+     * <ol>
+     *   <li>{@code currentEffectiveColors[rel.from]} — vom Resolver
+     *       berechnete Tag-/Label-Farbe (höchste Priorität).</li>
+     *   <li>{@code currentLeidenColors[rel.from]} — Leiden-Cluster-Farbe.</li>
+     *   <li>tatsächliche Farbe der Source-Node aus dem NVL-State
+     *       ({@code nvl.getNodes()}) — das ist die Farbe, die
+     *       {@code GraphNode.setColor(...)} (direkt oder via
+     *       {@code GraphFileParser} aus dem GML-Attribut {@code color})
+     *       in den Graph geschrieben hat. Über diese Stufe übernehmen
+     *       NVL-Edges automatisch die Source-Node-Farbe, ohne dass
+     *       die Anwenderin den Tag-/Cluster-Color-Mode aktivieren
+     *       muss — Sigma-/Cytoscape-konform.</li>
+     * </ol>
      * Synchronisiert auch die Backup-Einträge in {@code hiddenRelBackups},
      * damit beim Re-Insert eines gerade wiederhergestellten Rels die
      * aktuelle Source-Farbe mitwandert (sonst würde der Restore-Pfad mit
@@ -519,10 +531,28 @@
         if (!rels || rels.length === 0) return;
         var ec = currentEffectiveColors || {};
         var lc = currentLeidenColors || {};
+        // Stufe 3: aktuelle Farbe der Source-Node direkt aus dem
+        // NVL-Graph-State. Wird einmal pro Aufruf in einer Map
+        // zwischengespeichert, damit der Lookup O(1) pro Rel bleibt
+        // statt bei jedem Rel erneut durch alle Nodes zu iterieren.
+        // Greift, wenn die Source-Farbe ueber `GraphNode.setColor`
+        // gesetzt wurde und weder Resolver noch Leiden aktiv sind
+        // (z.B. nach `GraphFileParser` aus einem GML-`color`-Attribut).
+        var nodeColorById = Object.create(null);
+        var allNodes = nvl.getNodes();
+        if (allNodes && allNodes.length > 0) {
+            for (var k = 0; k < allNodes.length; k++) {
+                var n = allNodes[k];
+                if (n && n.id && n.color) nodeColorById[n.id] = n.color;
+            }
+        }
+        function sourceColor(fromId) {
+            return ec[fromId] || lc[fromId] || nodeColorById[fromId];
+        }
         var updates = [];
         for (var i = 0; i < rels.length; i++) {
             var r = rels[i];
-            var srcColor = ec[r.from] || lc[r.from];
+            var srcColor = sourceColor(r.from);
             if (srcColor && r.color !== srcColor) {
                 updates.push({ id: r.id, color: srcColor });
             }
@@ -533,7 +563,7 @@
         // umgefärbt wurde.
         Object.keys(hiddenRelBackups).forEach(function (id) {
             var br = hiddenRelBackups[id];
-            var sc = ec[br.from] || lc[br.from];
+            var sc = sourceColor(br.from);
             if (sc && br.color !== sc) br.color = sc;
         });
         if (updates.length > 0) {

@@ -27,6 +27,7 @@ graph [
     implicitProvidedApiMethodCountTest "294"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#b3d9ff"
   ]
   node [
     id 1
@@ -49,6 +50,7 @@ graph [
     implicitProvidedApiMethodCountProd 3941
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#b3d9ff"
   ]
   node [
     id 2
@@ -75,6 +77,7 @@ graph [
     implicitProvidedApiMethodCountTest "224"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#b3ffb3"
   ]
   node [
     id 3
@@ -101,6 +104,7 @@ graph [
     implicitProvidedApiMethodCountTest "295"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#b3ffb3"
   ]
   node [
     id 4
@@ -128,6 +132,7 @@ graph [
     implicitProvidedApiMethodCountTest "205"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#b3ffb3"
   ]
   node [
     id 5
@@ -152,6 +157,7 @@ graph [
     implicitProvidedApiMethodCountTest "14"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#ffd699"
   ]
   node [
     id 6
@@ -180,6 +186,7 @@ graph [
     implicitProvidedApiMethodCountTest "126"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#ffd699"
   ]
   node [
     id 7
@@ -208,6 +215,7 @@ graph [
     implicitProvidedApiMethodCountTest "208"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#ffd699"
   ]
   node [
     id 8
@@ -232,6 +240,7 @@ graph [
     implicitProvidedApiMethodCountTest "364"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#ffd699"
   ]
   node [
     id 9
@@ -260,6 +269,7 @@ graph [
     implicitProvidedApiMethodCountTest "223"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#e0b3ff"
   ]
   node [
     id 10
@@ -282,6 +292,8 @@ graph [
     implicitProvidedApiMethodCountProd 4319
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#e0b3ff"
+    color "#ffffb3"
   ]
   node [
     id 11
@@ -310,6 +322,7 @@ graph [
     implicitProvidedApiMethodCountTest "526"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#e0b3ff"
   ]
   node [
     id 12
@@ -337,6 +350,7 @@ graph [
     implicitProvidedApiMethodCountTest "85"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#ffffb3"
   ]
   node [
     id 13
@@ -363,6 +377,7 @@ graph [
     implicitProvidedApiMethodCountTest "44"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#ffffb3"
   ]
   node [
     id 14
@@ -391,6 +406,7 @@ graph [
     implicitProvidedApiMethodCountTest "295"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#ffffb3"
   ]
   node [
     id 15
@@ -415,6 +431,7 @@ graph [
     implicitProvidedApiMethodCountTest "70"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#ffffb3"
   ]
   node [
     id 16
@@ -440,6 +457,7 @@ graph [
     implicitProvidedApiMethodCountProd 84
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#ffffb3"
   ]
   node [
     id 17
@@ -468,6 +486,7 @@ graph [
     implicitProvidedApiMethodCountTest "608"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#ffffb3"
   ]
   node [
     id 18
@@ -496,6 +515,7 @@ graph [
     implicitProvidedApiMethodCountTest "575"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#ffffb3"
   ]
   node [
     id 19
@@ -522,6 +542,7 @@ graph [
     implicitProvidedApiMethodCountTest "90"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#b3ecff"
   ]
   node [
     id 20
@@ -550,6 +571,7 @@ graph [
     implicitProvidedApiMethodCountTest "316"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#b3ecff"
   ]
   node [
     id 21
@@ -595,6 +617,7 @@ graph [
     explicitUsedApiMethodCountProd "5"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#b3ecff"
   ]
   node [
     id 23
@@ -623,6 +646,7 @@ graph [
     implicitProvidedApiMethodCountTest "19"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#b3ecff"
   ]
   node [
     id 24
@@ -650,6 +674,7 @@ graph [
     implicitProvidedApiMethodCountTest "15"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#b3ecff"
   ]
   node [
     id 25
@@ -1282,6 +1307,7 @@ graph [
     implicitProvidedApiMethodCountTest "667"
     isFramework "false"
     _nodeType_ "Produkt"
+    color "#b3ecff"
   ]
   node [
     id 49

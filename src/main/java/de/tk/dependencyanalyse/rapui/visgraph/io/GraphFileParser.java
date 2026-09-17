@@ -160,12 +160,15 @@ public final class GraphFileParser {
         // and any nested graphics [...] blocks) are forwarded into the
         // GraphNode properties bag as-is.
         String label = null;
+        String color = null;
         Map<String, Object> extraProps = new LinkedHashMap<>();
         while (true) {
             GmlToken nk = tok.next();
             if (nk == null || nk.kind == GmlToken.Kind.CLOSE) break;
             if (nk.isIdent("id")) {
                 id = tok.readScalar();
+            } else if (nk.isIdent("color")) {
+                color = tok.readScalar();
             } else if (nk.isIdent("label")) {
                 label = tok.readScalar();
                 if (label != null) extraProps.put("label", label);
@@ -196,6 +199,9 @@ public final class GraphFileParser {
                 graphNode.setSvgShape(label, (String) extraProps.get("_nodeType_"), "#00FFFF");
             } else {
                 graphNode.setSvgShape(label, "Node", id);
+            }
+            if( color != null ) {
+                graphNode.setColor(color);
             }
             nodes.putIfAbsent(id, graphNode);
         }

@@ -311,4 +311,47 @@ class NvlViewerJsSourceTest {
         assertTrue(body.contains("type === 'cluster'") || body.contains("type == 'cluster'"),
                 "computeKeptNodeIds must implement the cluster branch");
     }
+
+    /**
+     * Regression guard for the "Edges ignore source-node colors set via
+     * {@code GraphNode.setColor} when no Tag-/Cluster-color mode is
+     * active" bug. The lookup chain in {@code applyEdgeColors} must
+     * have a third fallback that reads the current color of the
+     * source node straight from {@code nvl.getNodes()}, otherwise the
+     * direct {@code setColor} path (e.g. {@code GraphFileParser}
+     * pulling a GML {@code color} attribute) silently drops the
+     * source color and NVL renders the edge in its
+     * {@code defaultRelationshipColor} instead.
+     */
+    @Test
+    void applyEdgeColorsFallsBackToCurrentNodeColor() throws Exception {
+        String src = readViewerJs();
+        int idx = src.indexOf("function applyEdgeColors");
+        assertTrue(idx > 0,
+                "nvl-graph-viewer.js must define applyEdgeColors()");
+        int end = src.indexOf("\n    function ", idx + 10);
+        if (end < 0) end = src.length();
+        String body = src.substring(idx, end);
+        // Dritte Lookup-Stufe: nvl.getNodes() liefert die Node-Objekte
+        // mit dem `color`-Feld, das `GraphNode.setColor(...)` ueber
+        // `toNvlNode` in den Graph geschrieben hat.
+        assertTrue(body.contains("nvl.getNodes()"),
+                "applyEdgeColors must call nvl.getNodes() to read the "
+                        + "current source-node color (third fallback after "
+                        + "currentEffectiveColors / currentLeidenColors — "
+                        + "covers the GraphNode.setColor path)");
+        // Resolver- und Leiden-Stufe muessen weiterhin Vorrang haben —
+        // Tag-/Cluster-Farben duerfen nicht von einer eventuell
+        // veralteten setColor-Farbe uebersteuert werden.
+        int idxEc = body.indexOf("currentEffectiveColors");
+        int idxLc = body.indexOf("currentLeidenColors");
+        int idxNodes = body.indexOf("nvl.getNodes()");
+        assertTrue(idxEc > 0 && idxLc > 0 && idxNodes > 0,
+                "applyEdgeColors must consult all three sources "
+                        + "(currentEffectiveColors, currentLeidenColors, nvl.getNodes)");
+        assertTrue(idxEc < idxNodes,
+                "resolver map must be consulted before the nvl.getNodes() fallback");
+        assertTrue(idxLc < idxNodes,
+                "Leiden map must be consulted before the nvl.getNodes() fallback");
+    }
 }

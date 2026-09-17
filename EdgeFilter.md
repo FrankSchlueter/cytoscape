@@ -284,13 +284,18 @@ unterstützt.
 **Cluster-Edges und Bridge-Edges:** bleiben sichtbar. Die Farbe jedes
 Edges wird beim Aktivieren des Filters auf die Farbe der
 **Quell-Node** gesetzt (`applyEdgeColors` in
-`nvl-graph-viewer.js:507-540`) — Sigma-konform zu
+`nvl-graph-viewer.js:507-580`) — Sigma-konform zu
 `sigma-viewer.js:1653-1672` (`buildEdgeReducer`) und Cytoscape-konform
 zu `cytoscape-viewer.js:2666-2667` (`data(sourceCommunityColor)`).
 Cluster-Edges tragen damit die Cluster-Farbe der Source-Node; Bridges
 behalten die Farbe ihrer (externen) Source-Node. Lookup-Reihenfolge:
 `currentEffectiveColors[rel.from]` → `currentLeidenColors[rel.from]`
-→ Default-Farbe aus dem Edge-Property.
+→ tatsächliche Farbe der Source-Node aus `nvl.getNodes()`
+(= das, was `GraphNode.setColor(...)` über `toNvlNode` reingeschrieben
+hat) → Default-Farbe aus dem Edge-Property. Dank der dritten Stufe
+folgen NVL-Edges automatisch der Source-Farbe, auch wenn diese nur
+über `GraphNode.setColor` (z.B. via GML-`color`-Attribut) gesetzt
+wurde und kein Tag-/Cluster-Color-Mode aktiv ist.
 
 **Node-Sichtbarkeit:** NVL blendet zusätzlich zu den Edges auch die
 nicht-zugehörigen Nodes aus (`applyNodeFilter` in
