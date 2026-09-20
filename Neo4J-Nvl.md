@@ -192,3 +192,29 @@ public class GraphVisualizationComponent {
 }
 ```
 
+## NVL Overlay-Icon Demo
+
+Ein zweiter Entry-Point demonstriert NVL-native `overlayIcon`-Rendering:
+
+```
+http://localhost:8085/nvl-icon
+```
+
+Liefert einen synthetischen 10-Node / 20-Edge-Graph mit:
+- 10 unterschiedlichen Node-Hintergrundfarben (NVL-native `color`)
+- 8 SVG-Icons aus `/static/icons/`, zyklisch allen 10 Nodes zugewiesen
+- 5 Nodes mit Annotation-Char in Kreis (eigene Annotation-Farbpalette, unabhängig von Node-Farbe)
+- 5 Nodes ohne Annotation
+
+API auf `GraphNode`:
+
+```java
+// Nur Icon, ohne Annotation
+node.setSvgOverlayIcon("java-16-svgrepo-com.svg");
+
+// Icon + Annotation-Char in Kreis mit konfigurierter Hintergrundfarbe
+node.setSvgOverlayIcon("java-16-svgrepo-com.svg", 'C', "#FF6B6B");
+```
+
+Cytoscape und vis-network mappen die neue Methode intern auf `setSvgIcon(...)` — das bestehende Composite-Badge-Rendering wird wiederverwendet.
+

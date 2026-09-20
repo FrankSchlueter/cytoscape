@@ -49,6 +49,10 @@ public final class GraphNode {
 // TversUsageProductColorsTest for the regression coverage.
 private static final String SVG_IMAGE_2 = "svgImage2";
 
+	private static final String SVG_OVERLAY = "svgOverlay";
+
+	private static final String SVG_OVERLAY_RAW_SVG = "rawSvg";
+
 	private static final String SHAPE = "shape";
 
 	private static final String IMAGE = "image";
@@ -296,6 +300,119 @@ private static final String SVG_IMAGE_2 = "svgImage2";
 		visualAttrs.put(IMAGE, dataUri);
 		visualAttrs.put(LABEL, label == null ? "" : label);
 		return this;
+	}
+
+	/**
+	 * Mark this node as carrying a transparent SVG icon overlay. Designed
+	 * for the NVL viewer where the node itself keeps its native {@code color}
+	 * (a filled circle) and the transparent SVG is layered on top via NVL's
+	 * native {@code overlayIcon} property.
+	 *
+	 * <p>For Cytoscape and vis-network the call delegates to
+	 * {@link #setSvgIcon(String, String, char, String)} with a white
+	 * background so the existing self-contained composite-badge rendering
+	 * is reused — no separate Cytoscape/vis code path is needed.</p>
+	 *
+	 * <p>Pass the icon name (e.g. {@code "java-16-svgrepo-com.svg"}). If
+	 * the icon file cannot be found on the classpath the call is a no-op
+	 * (a warning is logged) and any previously configured visual
+	 * attributes remain untouched.</p>
+	 *
+	 * @param svgIconName the SVG file name relative to {@code /static/icons/}
+	 */
+	public GraphNode setSvgOverlayIcon(String svgIconName) {
+		return setSvgOverlayIcon(svgIconName, ' ', null);
+	}
+
+	/**
+	 * Mark this node as carrying a transparent SVG icon overlay plus an
+	 * optional annotation character in a circle with a defined background
+	 * color. The annotation circle is anchored at the bottom-right corner
+	 * of the icon (mirroring the layout of the existing
+	 * {@code renderSvgIconWithAnnotation} pattern).
+	 *
+	 * <p>Like the single-argument overload, this delegates to
+	 * {@link #setSvgIcon(String, String, char, String)} for Cytoscape and
+	 * vis-network so the same icon library produces both the transparent
+	 * NVL overlay and the self-contained composite badge for the other
+	 * engines. The composite badge receives the annotation-circle color
+	 * as its background tint.</p>
+	 *
+	 * <p>To skip the annotation pass {@code type = ' '} or {@code 0} and a
+	 * {@code null} {@code circleBackgroundColor} — the renderer will
+	 * produce a 43×43 transparent SVG with just the white icon centered.</p>
+	 *
+	 * @param svgIconName           the SVG file name relative to
+	 *                              {@code /static/icons/}
+	 * @param type                  single character rendered in the
+	 *                              annotation circle (e.g. {@code 'C'} for
+	 *                              class); pass {@code ' '} or {@code 0} to
+	 *                              suppress the annotation entirely
+	 * @param circleBackgroundColor fill color for the annotation circle
+	 *                              (e.g. {@code "#E74C3C"}); ignored when
+	 *                              {@code type} is blank
+	 */
+	public GraphNode setSvgOverlayIcon(String svgIconName, char type, String circleBackgroundColor) {
+		if (svgIconName == null || svgIconName.isEmpty()) {
+			LOG.warning("setSvgOverlayIcon: missing icon name");
+			return this;
+		}
+		// 1) Render the transparent overlay SVG (NVL surface) and cache it
+		//    on a dedicated descriptor slot so toNvlNode() can emit the
+		//    NVL overlayIcon property without touching the cytoscape/vis
+		//    composite image attribute.
+		String overlayRaw = SvgRenderer.renderTransparentSvgIconOverlay(svgIconName, type, circleBackgroundColor);
+		if (overlayRaw == null) {
+			LOG.warning("setSvgOverlayIcon: icon not found on classpath: " + ICON_RESOURCE_PREFIX + svgIconName);
+			return this;
+		}
+		Map<String, Object> descriptor = new LinkedHashMap<>();
+		descriptor.put(ICON_NAME, svgIconName);
+		descriptor.put(TYPE, String.valueOf(type));
+		if (circleBackgroundColor != null && !circleBackgroundColor.isEmpty()) {
+			descriptor.put(CIRCLE_BACKGROUND_COLOR, circleBackgroundColor);
+		}
+		descriptor.put(SVG_OVERLAY_RAW_SVG, overlayRaw);
+		visualAttrs.put(SVG_OVERLAY, descriptor);
+
+		// 2) Cytoscape + vis-network surface: delegate to setSvgIcon so
+		//    the existing self-contained composite-badge path is reused.
+		//    - With annotation: badge background = circleBackgroundColor
+		//      (matches the corner-circle tint the user can see)
+		//    - Without annotation: badge background = white so the icon
+		//      reads on its own (no transparent background is possible in
+		//      a vis-network `image` payload — the node IS the image)
+		boolean wantsAnnotation = (type != ' ' && type != 0);
+		String badgeBg = wantsAnnotation && circleBackgroundColor != null && !circleBackgroundColor.isEmpty()
+				? circleBackgroundColor
+				: "#ffffff";
+		String existingLabel = visualAttrs.containsKey(LABEL)
+				? String.valueOf(visualAttrs.get(LABEL))
+				: "";
+		setSvgIcon(svgIconName, badgeBg, wantsAnnotation ? type : ' ', existingLabel);
+		return this;
+	}
+
+	/**
+	 * Returns the {@code svgOverlay} descriptor map written by every
+	 * {@code setSvgOverlayIcon(...)} overload — or {@code null} if the
+	 * node has not been marked with a transparent overlay icon.
+	 *
+	 * <p>The returned map is the live internal map; callers MUST NOT
+	 * mutate it.</p>
+	 */
+	public Map<String, Object> getSvgOverlay() {
+		Object raw = visualAttrs.get(SVG_OVERLAY);
+		return (raw instanceof Map<?, ?>) ? (Map<String, Object>) raw : null;
+	}
+
+	/**
+	 * Whether this node has been marked with a transparent SVG overlay
+	 * icon via {@link #setSvgOverlayIcon(String)} or the annotation-aware
+	 * overload.
+	 */
+	public boolean hasSvgOverlay() {
+		return visualAttrs.containsKey(SVG_OVERLAY);
 	}
 
 	/**
@@ -943,6 +1060,53 @@ private static final String SVG_IMAGE_2 = "svgImage2";
 		String nvlColor = ColorSpec.toNvlString(rawColor);
 		if (nvlColor != null) {
 			out.put("color", nvlColor);
+		}
+		// NVL-natives overlayIcon: transparentes SVG über die farbige
+		// Node-Circle blenden. Wird nur emittiert, wenn setSvgOverlayIcon
+		// aufgerufen wurde (Cytoscape/vis kümmern sich über setSvgIcon um
+		// ihre eigene composite-Badge-Darstellung). size=0.7 = 70% des
+		// Node-Durchmessers, damit der Annotation-Kreis leicht über den
+		// Rand ragen darf (klassischer Badge-Look).
+		//
+		// NVL rendert den Caption-Text NACH dem overlayIcon, also
+		// z-order-mäßig darüber. Mit dem NVL-Default
+		// captionAlign="center" würde der Text mittig auf dem Node
+		// sitzen und das Overlay überlappen.
+		//
+		// Wenn ein Caption-Text vorhanden ist (getCaption() != null):
+		//   - captionAlign="bottom" verschiebt den Text um radius/π
+		//     (~0.318·r) nach unten
+		//   - overlayIcon.position = [0, -0.5] schiebt das Icon um
+		//     0.5·r nach oben
+		//   → Icon oben, Text sauber darunter
+		//
+		// Wenn KEIN Caption-Text vorhanden ist (getCaption() == null):
+		//   - kein captionAlign → NVL-Default "center" greift (kein
+		//     Text, also kein Konflikt)
+		//   - overlayIcon.position = [0, 0] → Icon bleibt mittig auf
+		//     dem Node, ohne leere Textzone unter dem Node
+		//
+		// NVL interpretiert position[1] in Einheiten des Node-Radius,
+		// negative Werte = oben.
+		Object overlayRaw = visualAttrs.get(SVG_OVERLAY);
+		if (overlayRaw instanceof Map<?, ?> overlayMap) {
+			Object rawSvg = overlayMap.get(SVG_OVERLAY_RAW_SVG);
+			if (rawSvg instanceof String svg && !svg.isEmpty()) {
+				String overlayCaption = getCaption();
+				boolean hasCaption = overlayCaption != null && !overlayCaption.isEmpty();
+				Map<String, Object> overlayIcon = new LinkedHashMap<>();
+				overlayIcon.put("url", toSvgDataUri(svg));
+				overlayIcon.put("size", 0.7);
+				if (hasCaption) {
+					overlayIcon.put("position", java.util.Arrays.asList(0, -0.5));
+					out.put("captionAlign", "bottom");
+				} else {
+					// Kein Caption → Icon mittig, kein captionAlign emittiert
+					// (NVL-Default "center" greift, ist aber ohne Text wirkungslos).
+					overlayIcon.put("position", java.util.Arrays.asList(0, 0));
+				}
+				out.put("overlayIcon", overlayIcon);
+			}
 		}
 		return out;
 	}

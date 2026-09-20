@@ -24,6 +24,7 @@ public class Application {
         SpringApplication.run(Application.class, args);
         System.out.println("Server started at http://localhost:8085/graph");
         System.out.println("Server started at http://localhost:8085/vis-graph");
+        System.out.println("Server started at http://localhost:8085/nvl-icon");
         System.out.println("Server started at http://localhost:8085/api/sample-graph");
     }
 }

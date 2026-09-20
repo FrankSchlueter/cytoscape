@@ -59,7 +59,7 @@ public class RapServletInitializer implements WebMvcConfigurer {
 
             ServletRegistration.Dynamic rap = servletContext.addServlet("rap", RWTServlet.class);
             rap.setLoadOnStartup(1);
-            rap.addMapping(new String[] { "/graph" });
+            rap.addMapping(new String[] { "/graph", "/nvl-icon" });
         };
     }
 

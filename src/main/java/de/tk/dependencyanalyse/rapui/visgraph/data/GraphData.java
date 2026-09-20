@@ -25,10 +25,24 @@ public final class GraphData {
     private final List<GraphRelationship> relationships;
     private final Map<String, GraphNode> nodeIndex;
     private final Map<String, GraphRelationship> relationshipIndex;
+    private final Map<String, String> colorPalette;
 
     public GraphData(List<GraphNode> nodes, List<GraphRelationship> relationships) {
+        this(nodes, relationships, Map.of());
+    }
+
+    /**
+     * Full constructor — accepts an optional per-node color palette that
+     * travels with the graph and is auto-pushed to the NVL engine's Color
+     * Palette panel by {@code Neo4jNvlViewer.setGraphData(...)}.
+     */
+    public GraphData(List<GraphNode> nodes, List<GraphRelationship> relationships,
+                     Map<String, String> colorPalette) {
         this.nodes = nodes == null ? List.of() : List.copyOf(nodes);
         this.relationships = relationships == null ? List.of() : List.copyOf(relationships);
+        this.colorPalette = colorPalette == null
+                ? Map.of()
+                : Collections.unmodifiableMap(new LinkedHashMap<>(colorPalette));
 
         Map<String, GraphNode> ni = new LinkedHashMap<>();
         for (GraphNode n : this.nodes) {
@@ -74,6 +88,37 @@ public final class GraphData {
             customizer.accept(r);
         }
         return this;
+    }
+
+    /**
+     * Attach a per-node color palette (id → hex) to this graph. When this
+     * graph is loaded into a viewer that supports the Color Palette panel
+     * (currently {@code Neo4jNvlViewer} via {@code SwitchingViewer}), the
+     * map is auto-pushed via {@code NvlJsBridge.setLeidenColors(...)},
+     * which derives panel rows via {@code LegendBuilder.fromLeidenClusters}
+     * and renders them in the iframe's Color Palette panel.
+     *
+     * <p>Returns a NEW {@code GraphData} instance — this class is
+     * immutable by design. Pass {@code null} or an empty map to clear the
+     * palette. Sigma / Cytoscape / vis-network ignore this map: their
+     * palette state is still driven exclusively by
+     * {@code SwitchingViewer.applyNodeColors(...)} /
+     * {@code setLeidenClusterColors(...)}.</p>
+     *
+     * @param colorMap per-node id → hex map, or {@code null} to clear
+     * @return a new {@code GraphData} with the palette replaced
+     */
+    public GraphData setColorPalette(Map<String, String> colorMap) {
+        Map<String, String> safe = colorMap == null ? Map.of() : colorMap;
+        return new GraphData(this.nodes, this.relationships, safe);
+    }
+
+    /**
+     * Returns the per-node color palette attached to this graph, or
+     * {@code Map.of()} when none was set. The returned map is immutable.
+     */
+    public Map<String, String> getColorPalette() {
+        return colorPalette;
     }
 
     /**

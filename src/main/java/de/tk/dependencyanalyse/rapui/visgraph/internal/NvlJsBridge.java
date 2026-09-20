@@ -229,6 +229,25 @@ public final class NvlJsBridge {
         exec("window.vgv_hideColorPalette();");
     }
 
+    /**
+     * Push per-node {@code overlayIcon} updates to the iframe. Each
+     * entry is {@code {id, overlayIcon}} where {@code overlayIcon} is the
+     * native NVL shape ({@code {url, position?, size?}}). The JS handler
+     * {@code vgv_applyNodeImages} (in {@code nvl-graph-viewer.js})
+     * forwards the updates via {@code nvl.updateElementsInGraph} so the
+     * icons are layered on top of the existing NVL node circles.
+     *
+     * <p>Used by {@link de.tk.dependencyanalyse.rapui.visgraph.Neo4jNvlViewer#applyNodeImages}
+     * for runtime overlay swaps (e.g. recoloring the badge without
+     * reloading the whole graph). The initial overlay payload is shipped
+     * as part of {@link GraphNode#toNvlNode()} so this method is only
+     * needed for in-place updates after the graph is on screen.</p>
+     */
+    public void applyNodeImages(List<Map<String, Object>> updates) {
+        if (updates == null || updates.isEmpty()) return;
+        exec("window.vgv_applyNodeImages(" + gson.toJson(updates) + ");");
+    }
+
     public void fitToScreen() {
         exec("window.vgv_fitToScreen();");
     }

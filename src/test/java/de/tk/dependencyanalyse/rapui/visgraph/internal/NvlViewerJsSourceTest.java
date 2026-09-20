@@ -354,4 +354,61 @@ class NvlViewerJsSourceTest {
         assertTrue(idxLc < idxNodes,
                 "Leiden map must be consulted before the nvl.getNodes() fallback");
     }
+
+    /**
+     * The overlay-icon pipeline is exercised by {@link
+     * NvlJsBridge#applyNodeImages} which forwards to {@code
+     * vgv_applyNodeImages} in the iframe. The handler must:
+     * <ul>
+     *   <li>be registered on {@code window} so the bridge can find it;</li>
+     *   <li>forward the payload to {@code nvl.updateElementsInGraph} so
+     *       the icons are layered onto the existing nodes.</li>
+     * </ul>
+     * The handler is the runtime path for icon swaps after the graph is
+     * on screen (the initial overlay set is shipped via {@code
+     * toNvlNode} during the regular {@code setData} cycle).
+     */
+    @Test
+    void vgvApplyNodeImagesIsImplemented() throws Exception {
+        String src = readViewerJs();
+        assertTrue(src.contains("window.vgv_applyNodeImages"),
+                "nvl-graph-viewer.js must register window.vgv_applyNodeImages");
+        int idx = src.indexOf("window.vgv_applyNodeImages");
+        assertTrue(idx > 0);
+        int end = src.indexOf("\n    };\n", idx);
+        if (end < 0) end = src.length();
+        String body = src.substring(idx, end);
+        // Must call nvl.updateElementsInGraph(updates, []) — empty rels array
+        // because overlayIcon only targets nodes.
+        assertTrue(body.contains("nvl.updateElementsInGraph"),
+                "vgv_applyNodeImages must call nvl.updateElementsInGraph to push the overlayIcon updates");
+        // Must guard against nvlReady === false and an empty updates list,
+        // matching the defensive pattern used by vgv_applyNodeColors.
+        assertTrue(body.contains("nvlReady"),
+                "vgv_applyNodeImages must wait for nvlReady before calling NVL APIs");
+    }
+
+    /**
+     * Regression guard: {@code cloneNodeProps} must include
+     * {@code captionAlign} in its allow-list. The Java-side
+     * {@code GraphNode.toNvlNode()} emits {@code captionAlign: "bottom"}
+     * for every node that carries a transparent overlay icon, so the
+     * caption text drops below the icon instead of overlapping it. If
+     * the wrapper drops the field on a runtime swap, the next redraw
+     * would silently recenter the caption over the icon.
+     */
+    @Test
+    void cloneNodePropsRoundTripsCaptionAlign() throws Exception {
+        String src = readViewerJs();
+        int idx = src.indexOf("function cloneNodeProps");
+        assertTrue(idx > 0,
+                "nvl-graph-viewer.js must define cloneNodeProps()");
+        int end = src.indexOf("\n    }\n", idx);
+        if (end < 0) end = src.length();
+        String body = src.substring(idx, end);
+        assertTrue(body.contains("captionAlign"),
+                "cloneNodeProps must propagate captionAlign so the "
+                        + "overlayIcon's 'bottom' alignment survives "
+                        + "nvl.updateElementsInGraph round-trips");
+    }
 }

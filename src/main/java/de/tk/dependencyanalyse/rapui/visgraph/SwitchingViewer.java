@@ -49,6 +49,13 @@ public class SwitchingViewer extends Composite {
 
     /** Last Leiden cluster colors pushed via {@link #setLeidenClusterColors}. */
     private Map<String, String> currentLeidenColors = Map.of();
+    /**
+     * Per-node color palette that travels with the
+     * {@link GraphData} instance (see {@link GraphData#setColorPalette}).
+     * Re-pushed to the NVL viewer whenever NVL becomes the active engine,
+     * so the Color Palette panel survives an engine round-trip.
+     */
+    private Map<String, String> currentColorPalette = Map.of();
     /** True when the community-aggregation view is currently active on the active engine. Survives engine switches. */
     private boolean communityViewActive = false;
     /** Legend state. {@code null} means no legend has ever been set. */
@@ -163,6 +170,11 @@ public class SwitchingViewer extends Composite {
             if (!currentLeidenColors.isEmpty()) {
                 nvlViewer.setLeidenClusterColors(currentLeidenColors);
             }
+            // Re-apply the graph-attached Color Palette so the panel
+            // reappears after an engine round-trip into NVL.
+            if (!currentColorPalette.isEmpty()) {
+                nvlViewer.setLeidenClusterColors(currentColorPalette);
+            }
             // Push the unified per-node color map so the freshly-
             // created viewer reflects the same colors the previous
             // engine showed.
@@ -219,12 +231,25 @@ public class SwitchingViewer extends Composite {
 
     public void setGraphData(GraphData data) {
         this.currentData = data;
+        // Cache the per-node palette attached to the graph so we can
+        // re-push it to the active engine (and re-apply it on future
+        // engine switches into NVL). Sigma / Cytoscape / vis-network
+        // ignore this map — their palette is driven by applyNodeColors /
+        // setLeidenClusterColors.
+        if (data != null && data.getColorPalette() != null && !data.getColorPalette().isEmpty()) {
+            this.currentColorPalette = Map.copyOf(data.getColorPalette());
+        } else {
+            this.currentColorPalette = Map.of();
+        }
         if (currentEngine == GraphEngine.CYTOSCAPE && cytoscapeViewer != null) {
             cytoscapeViewer.setGraphData(data);
         } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
             sigmaViewer.setGraphData(data);
         } else if (currentEngine == GraphEngine.NEO4J_NVL && nvlViewer != null) {
             nvlViewer.setGraphData(data);
+            if (!currentColorPalette.isEmpty()) {
+                nvlViewer.setLeidenClusterColors(currentColorPalette);
+            }
         } else if (visViewer != null) {
             visViewer.setGraphData(data);
         }

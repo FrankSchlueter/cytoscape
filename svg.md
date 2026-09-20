@@ -190,6 +190,106 @@ Regression-Coverage: `GraphNodeRecolorSvgShapeTest`, `SvgBadgeColorUpdaterTest`,
 - Recolor-Flow ist trivial: Java rendert mit neuer Farbe, schickt URI, Browser zeigt
 - Keine SVG-Generation-Logik im JS-Code
 
+## Overlay-Icons im NVL-Viewer
+
+NVL bietet nativ ein `overlayIcon`-Property auf Nodes: ein transparentes SVG wird mit `size` (Bruchteil des Node-Durchmessers) und `position` (in Node-Radii) über den NVL-eigenen farbigen Circle geblendet. Damit lässt sich das Cytoscape/vis-Pattern ("Node = Composite-Badge mit Icon + Annotation-Circle") im NVL-Viewer abbilden, ohne dass die Node-Farbe selbst verloren geht.
+
+### Wire-Format
+
+```js
+{
+  id: "n1",
+  color: "#3498DB",        // NVL-native farbiger Circle
+  captionAlign: "bottom",  // Caption unter dem Icon (Default wäre "center")
+  overlayIcon: {            // transparenter SVG-Layer darüber
+    url: "data:image/svg+xml;base64,...",
+    size: 0.7,              // 70% des Node-Durchmessers
+    position: [0, -0.5]     // Icon vertikal um 0.5 Radien nach oben verschoben
+  }
+}
+```
+
+**Caption-Position:** NVL zeichnet pro Node in fester Reihenfolge: Circle → Border-Ringe → Haupt-Icon → `overlayIcon` → Caption-Text. Der Caption-Text ist also immer on top im z-order. Ohne explizites `captionAlign` rendert NVL den Text mittig auf dem Node (`captionAlign: "center"`), was das Overlay-Icon überlappt. `GraphNode.toNvlNode()` emittiert daher automatisch `captionAlign: "bottom"` für jeden Node mit Overlay-Icon — der Text landet dann um `radius/π` (~0.318·r) unterhalb der Node-Mitte. Plain-Nodes (ohne Overlay) bekommen KEIN `captionAlign`, NVLs Default `center` greift.
+
+**Icon-Position (`overlayIcon.position`):** NVL interpretiert `position` als Verschiebung in Einheiten des Node-Radius:
+- `position[0]` = horizontaler Offset (0 = zentriert, +1 = eine Radiuse nach rechts)
+- `position[1]` = vertikaler Offset (negativ = nach oben, positiv = nach unten)
+
+Default ist `position: [0, 0]` → das Icon sitzt mittig auf dem Node. `GraphNode.toNvlNode()` entscheidet abhängig vom Caption-Status des Nodes:
+
+| `getCaption()` | `position` | `captionAlign` | Effekt |
+|---|---|---|---|
+| `null` oder leer | `[0, 0]` | (nicht emittiert) | Icon mittig auf dem Node, keine leere Textzone darunter |
+| nicht-leer | `[0, -0.5]` | `"bottom"` | Icon um 0.5·r nach oben verschoben, Text unter dem Node |
+
+So bekommt jeder Node das für sein Layout passende Overlay automatisch — mit Caption rutscht das Icon nach oben, ohne Caption bleibt es mittig. Bei einem Node-Radius von 25 px bedeutet `[0, -0.5]`: Icon-Vertikalmitte 12.5 px über der Node-Mitte, Icon-Unterkante auf Node-Mitte, Caption darunter.
+
+### Renderer: `SvgRenderer.renderTransparentSvgIconOverlay(iconName, type, circleBackgroundColor)`
+
+48×48 SVG **ohne** Hintergrund-Rect (5 px breiter als die ursprüngliche 43×43-Variante, damit der verkleinerte und nach rechts verschobene Annotation-Kreis noch ins Canvas passt). Wenn `type != ' '` und `type != 0`: zusätzlich Annotation-Kreis bei **(36, 31)** mit **r=8** (= 30% kleiner als der ursprüngliche r=12, gleichzeitig 5 px nach rechts verschoben von (31,31) auf (36,31)). Der Type-Char wird mit **`font-size="9"`** gerendert (30% größer als die ursprünglichen 7 px), damit er im verkleinerten Kreis lesbar bleibt. Sonst nur das weiße Icon zentriert. Das SVG ist vollständig transparent — die NVL-Node-Farbe scheint durch.
+
+### GraphNode-API
+
+```java
+// Nur Icon, ohne Annotation
+node.setSvgOverlayIcon("java-16-svgrepo-com.svg");
+
+// Icon + Annotation-Char in Kreis mit eigener Hintergrundfarbe
+node.setSvgOverlayIcon("java-16-svgrepo-com.svg", 'C', "#FF6B6B");
+
+// Zugriff auf den Descriptor (NVL-Wire-Format-Bestandteile)
+Map<String, Object> overlay = node.getSvgOverlay();   // {iconName, type, circleBackgroundColor?, rawSvg}
+boolean has = node.hasSvgOverlay();
+```
+
+### Engine-Abbildung
+
+| Engine | Rendering |
+|---|---|
+| **NVL** | `toNvlNode()` emittiert `overlayIcon: {url, size: 0.7}` — das transparente SVG wird vom NVL-Renderer nativ über den farbigen Node-Circle geblendet |
+| **Cytoscape** | `setSvgOverlayIcon(...)` delegiert intern an `setSvgIcon(...)` — der Node wird als Composite-Badge (gefüllter Hintergrund + Icon + Char) gerendert, kompatibel mit dem bestehenden `image`-Attribut-Pfad |
+| **vis-network** | gleiche Delegation an `setSvgIcon(...)` — Node-`shape="image"` mit dem Composite-Badge |
+
+Die Delegation an `setSvgIcon` stellt sicher, dass die Cytoscape-/vis-Pfade ihr bestehendes Rendering-Verhalten nicht ändern. Ohne Annotation wird der Badge-Hintergrund auf `#ffffff` gesetzt (kein transparenter Hintergrund im vis-`image`-Payload möglich).
+
+### Initial-Overlay vs. Runtime-Swap
+
+Der initiale Overlay-Set wird über den normalen `setGraphData`-Pfad transportiert — `GraphNode.toNvlNode()` bettet das `overlayIcon`-Property direkt in jeden Node-Record ein. Für Runtime-Swaps (z.B. Icon-Set zur Laufzeit austauschen) gibt es den expliziten Pfad:
+
+```java
+viewer.applyNodeImages(List.of(
+    Map.of("id", "n1", "overlayIcon", Map.of("url", "...", "size", 0.7))
+));
+```
+
+Die Bridge leitet das an `nvl.updateElementsInGraph(updates, [])` weiter, der JS-Handler `vgv_applyNodeImages` sitzt in `nvl-graph-viewer.js`.
+
+### Demo-Entry-Point
+
+`http://localhost:8085/nvl-icon` rendert einen synthetischen 20-Node / 40-Edge-Graph in zwei Batches:
+
+**Batch 1 (n0…n9) — beschriftete Nodes:**
+- 10 unterschiedliche Node-Hintergrundfarben
+- 8 SVG-Icons aus `/static/icons/` zyklisch verwendet
+- 5 Nodes mit Annotation-Char in Kreis (eigene Annotation-Farbpalette, unabhängig von Node-Farbe)
+- 5 Nodes ohne Annotation
+- Jeder Node hat einen `name`/`caption` → Icon um 0.5·r nach oben verschoben, Text darunter
+
+**Batch 2 (n10…n19) — unbeschriftete Nodes:**
+- 10 weitere unterschiedliche Node-Hintergrundfarben (eigene Palette)
+- 8 SVG-Icons in shuffled-Reihenfolge (alle 8 sichtbar)
+- 5 Nodes mit Annotation (andere Annotation-Chars: F–J)
+- 5 Nodes ohne Annotation
+- Kein `name`/`caption` → Icon bleibt mittig auf dem Node
+
+### Tests
+
+- `SvgRendererTransparentOverlayTest`: 48×48 transparent, Annotation-Kreis bei (36,31) r=8, mit/ohne Annotation, kein Hintergrund-Rect
+- `GraphNodeSvgOverlayTest`: `setSvgOverlayIcon`-Descriptor, Cytoscape/vis-Delegation, `toNvlNode`-Wire-Format, `captionAlign: "bottom"` für Nodes mit Caption, Icon zentriert ohne Caption
+- `NvlIconEntryPointTest`: 20/40 Nodes/Edges, Icon-Zyklus (Batch 1) + Shuffle (Batch 2), Annotation-Verteilung 10/10, Caption-Position je Batch
+- `NvlViewerJsSourceTest#vgvApplyNodeImagesIsImplemented`: JS-Handler existiert, ruft `nvl.updateElementsInGraph`
+- `NvlViewerJsSourceTest#cloneNodePropsRoundTripsCaptionAlign`: `captionAlign` bleibt in der Allow-list, damit Runtime-Swaps das Alignment nicht verlieren
+
 ### CSS-Klassen vs. Per-Node-Updates
 
 Cytoscape hat eine **Stylesheet-Engine** mit `selector { property: value }`-Regeln. Recoloring funktioniert über Style-Selector-Updates:

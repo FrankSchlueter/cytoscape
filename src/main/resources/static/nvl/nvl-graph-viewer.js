@@ -586,6 +586,13 @@
         if (n.size !== undefined) out.size = n.size;
         if (n.caption !== undefined) out.caption = n.caption;
         if (n.captionSize !== undefined) out.captionSize = n.captionSize;
+        // captionAlign is set to "bottom" by GraphNode.toNvlNode() for
+        // every node carrying a transparent overlay icon, so the icon
+        // sits on top of the NVL-node circle and the caption text drops
+        // below it. Without this entry, runtime icon swaps via
+        // nvl.updateElementsInGraph would silently drop the alignment
+        // and the next redraw would recenter the caption over the icon.
+        if (n.captionAlign !== undefined) out.captionAlign = n.captionAlign;
         if (n.labels !== undefined) out.labels = n.labels;
         if (n.showLabel !== undefined) out.showLabel = n.showLabel;
         if (n.overlayIcon !== undefined) out.overlayIcon = n.overlayIcon;
@@ -1232,6 +1239,28 @@ window.vgv_clear = function () {
     window.vgv_applyNodeColors = function (effective) {
         currentEffectiveColors = (effective && typeof effective === 'object') ? effective : {};
         updateNodeColors(effective);
+    };
+
+    /**
+     * Push per-node NVL {@code overlayIcon} updates to the live graph.
+     * Each entry is {@code {id, overlayIcon}} where {@code overlayIcon}
+     * follows NVL's native shape ({@code {url, position?, size?}}). The
+     * payload is forwarded directly to {@code nvl.updateElementsInGraph}
+     * so the transparent SVG icon is layered on top of the existing
+     * NVL node circle (which carries the {@code color} background).
+     *
+     * <p>The initial overlay set is shipped as part of the regular
+     * {@code vgv_setData} payload via {@code GraphNode.toNvlNode()} so
+     * this handler only matters for runtime swaps after the graph is on
+     * screen (e.g. recoloring the icon set without a full reload).</p>
+     */
+    window.vgv_applyNodeImages = function (updates) {
+        if (!nvlReady || !nvl || !updates || !updates.length) return;
+        try {
+            nvl.updateElementsInGraph(updates, []);
+        } catch (e) {
+            console.error('vgv_applyNodeImages failed', e);
+        }
     };
 
     /**

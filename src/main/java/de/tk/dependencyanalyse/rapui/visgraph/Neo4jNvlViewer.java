@@ -106,6 +106,16 @@ public class Neo4jNvlViewer extends Browser {
         runWhenReady(() -> {
             bridge.setCurrentData(data);
             bridge.applyData(data);
+            // Auto-push the per-node color palette that travels with the
+            // graph. setLeidenColors(...) drives refreshPalette() which
+            // derives panel entries via LegendBuilder.fromLeidenClusters
+            // and pushes vgv_applyColorPalette(entries, true) — so the
+            // Color Palette panel appears automatically for every NVL
+            // graph that declares a non-empty palette.
+            Map<String, String> palette = data.getColorPalette();
+            if (palette != null && !palette.isEmpty()) {
+                bridge.setLeidenColors(palette);
+            }
         });
     }
 
@@ -158,6 +168,24 @@ public class Neo4jNvlViewer extends Browser {
     public void applyNodeColors(Map<String, String> effective) {
         if (effective == null) return;
         runWhenReady(() -> bridge.applyNodeColors(effective));
+    }
+
+    /**
+     * Push per-node {@code overlayIcon} updates to the iframe. Each
+     * entry must carry the native NVL {@code overlayIcon} shape
+     * ({@code {url, position?, size?}}); the JS bridge forwards the
+     * payload to {@code nvl.updateElementsInGraph} so the icons layer
+     * on top of the existing NVL node circles.
+     *
+     * <p>The initial overlay payload is shipped as part of the regular
+     * {@link #setGraphData(GraphData)} path (see
+     * {@link GraphNode#toNvlNode()}), so this method is only needed for
+     * in-place updates after the graph is on screen — e.g. swapping the
+     * icon set at runtime.</p>
+     */
+    public void applyNodeImages(List<Map<String, Object>> updates) {
+        if (updates == null) return;
+        runWhenReady(() -> bridge.applyNodeImages(updates));
     }
 
     public void clear() {
