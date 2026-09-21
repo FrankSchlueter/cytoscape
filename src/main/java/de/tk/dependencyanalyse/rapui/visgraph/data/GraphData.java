@@ -410,5 +410,29 @@ public final class GraphData {
         out.put("nodes", nodeOut);
         out.put("relationships", relOut);
         return out;
-    }    
+    }
+
+    /**
+     * Serializes the graph for the 3D Force-Directed Graph bridge.
+     *
+     * <p>Returns a {@code { nodes: [...], links: [...] }} payload. Each node
+     * is the result of {@link GraphNode#toThreeForceGraphNode()} and each
+     * link is the result of {@link GraphRelationship#toThreeForceGraphLink()}.
+     * The key is {@code links} (not {@code relationships}) because that is
+     * what d3-force-3d / 3d-force-graph expect.</p>
+     */
+    public Map<String, Object> toThreeForceGraphData() {
+        List<Map<String, Object>> nodeOut = new ArrayList<>(nodes.size());
+        for (GraphNode n : nodes) {
+            nodeOut.add(n.toThreeForceGraphNode());
+        }
+        List<Map<String, Object>> linkOut = new ArrayList<>(relationships.size());
+        for (GraphRelationship r : relationships) {
+            linkOut.add(r.toThreeForceGraphLink());
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("nodes", nodeOut);
+        out.put("links", linkOut);
+        return out;
+    }
 }

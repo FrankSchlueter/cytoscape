@@ -1,12 +1,16 @@
 # cytoscape-graph-viewer
 
 Spring Boot + Eclipse RAP 4.4 Webanwendung zur Visualisierung von Graphen
-mit **drei umschaltbaren Rendering-Engines**:
+mit **fünf umschaltbaren Rendering-Engines**:
 
 - **Cytoscape.js + cytoscape-fcose** als Default-Renderer (gewichtet, mit Leiden-Clustering).
 - **vis-network** als zweite Engine für klassische Force-Directed-Layouts.
 - **sigma.js + graphology** als dritte Engine, optimiert für sehr große Graphen
   via gzip+base64-Push über die Rap-JS-Bridge (`window.vg_setDataGz`).
+- **Neo4j NVL** als vierte Engine, mit nativen Node-Overlays und
+  Color-Palette-Panel (`window.vgv_*`).
+- **3D Force-Directed Graph** (Three.js + d3-force-3d) als fünfte Engine
+  für hardware-beschleunigtes WebGL-Rendering (`window.tfgv_*`).
 
 Die Datenebene (Nodes, Relationships, Properties) ist engine-agnostisch und
 wird vom vis-graph-Projekt adaptiert. Der Beispielgraph
@@ -30,10 +34,28 @@ dem `weight`-Attribut berechnet (`idealEdgeLength = 50 + 30·log(weight)`).
 ## Engines
 
 Das `SwitchingViewer`-Composite beherbergt zur Laufzeit entweder einen
-`GraphViewer` (vis-network), einen `CytoscapeViewer` (Cytoscape.js) oder
-einen `SigmaViewer` (sigma.js + graphology). Umschaltung erfolgt über die
-Toolbar-Combobox **Engine: Vis / Cytoscape / Sigma**; Daten, NodeConfig und
+`GraphViewer` (vis-network), einen `CytoscapeViewer` (Cytoscape.js),
+einen `SigmaViewer` (sigma.js + graphology), einen `Neo4jNvlViewer`
+oder einen `ThreeForceGraphViewer` (Three.js + 3d-force-graph).
+Umschaltung erfolgt über die Toolbar-Combobox
+**Engine: Nvl / 3D / Cytoscape / Sigma / Vis**; Daten, NodeConfig und
 Layout bleiben erhalten.
+
+### 3D Force-Directed Graph (Engine #5) — WebGL via Three.js
+
+Siehe [3D-Force-Graph.md](3D-Force-Graph.md) für die vollständige
+Beschreibung. Kurz:
+
+- Vendor-Bundles (Three.js, kapsule, d3-force-3d, 3d-force-graph) sind
+  alle **lokal** unter `static/three/` gebundled — kein Internet zur
+  Laufzeit nötig.
+- Wire-Format nutzt `source`/`target` (nicht NVL's `from`/`to`).
+- Java Callbacks für Node-/Link-Selection (`tfgv_notifyNodeSelected` /
+  `tfgv_notifyLinkSelected`) und Selection-Cleared.
+- Tooltips für Nodes und Links (HTML, properties-table, NVL-paritätisch).
+- Color Palette Panel (top-right, auto-verwaltet vom Bridge).
+- **WebGL ist Hard-Requirement** — bei fehlendem WebGL-Kontext zeigt der
+  Iframe eine Inline-Fehlermeldung statt eines leeren Canvas.
 
 ### Sigma.js (Engine #3) — Rap-JS-Bridge mit gzip+base64
 

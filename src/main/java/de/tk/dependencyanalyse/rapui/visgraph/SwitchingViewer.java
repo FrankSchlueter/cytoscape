@@ -21,14 +21,16 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Logger;
 
 /**
- * Composite that hosts a graph viewer (vis-network or Cytoscape.js) and
- * exposes a small, engine-agnostic API to consumers.
+ * Composite that hosts a graph viewer (vis-network, Cytoscape.js,
+ * sigma.js, Neo4j NVL or 3D Force-Directed Graph) and exposes a small,
+ * engine-agnostic API to consumers.
  *
- * <p>Internally delegates to a {@link GraphViewer} (vis) or
- * {@link CytoscapeViewer}. The two viewers share the same API surface
- * ({@link #setGraphData(GraphData)}, {@link #setNodeConfig(NodeConfig)},
- * {@link #setLayout(LayoutAlgorithm)}, {@link #fitToScreen()}, selection
- * listeners) so this wrapper hides the swap entirely.</p>
+ * <p>Internally delegates to one of {@link GraphViewer}, {@link CytoscapeViewer},
+ * {@link SigmaViewer}, {@link Neo4jNvlViewer} or {@link ThreeForceGraphViewer}.
+ * All viewers share the same API surface ({@link #setGraphData(GraphData)},
+ * {@link #setNodeConfig(NodeConfig)}, {@link #setLayout(LayoutAlgorithm)},
+ * {@link #fitToScreen()}, selection listeners) so this wrapper hides the
+ * swap entirely.</p>
  *
  * <p>Engine switching is destructive: the old viewer is disposed and a
  * fresh one of the requested engine is created with the current data and
@@ -66,6 +68,7 @@ public class SwitchingViewer extends Composite {
     private CytoscapeViewer cytoscapeViewer;
     private SigmaViewer sigmaViewer;
     private Neo4jNvlViewer nvlViewer;
+    private ThreeForceGraphViewer threeForceGraphViewer;
 
     private final java.util.List<NodeSelectionListener> nodeListeners = new CopyOnWriteArrayList<>();
     private final java.util.List<RelationshipSelectionListener> relListeners = new CopyOnWriteArrayList<>();
@@ -95,11 +98,12 @@ public class SwitchingViewer extends Composite {
      *
      * <p>The optional legend payload (if {@link #setLegend} has been called
      * previously) is re-applied to the new engine so the panel survives an
-     * engine switch without user intervention. Sigma / Cytoscape / NVL are
-     * excluded — their Color Palette is auto-managed from the per-node
+     * engine switch without user intervention. Sigma / Cytoscape / NVL / 3D
+     * are excluded — their Color Palette is auto-managed from the per-node
      * color maps and re-derives itself when the new engine boots up.</p>
      */
     public void switchTo(GraphEngine engine) {
+        LOG.info("SwitchingViewer.switchTo: from=" + currentEngine + " to=" + engine + ", hasCurrentData=" + (currentData != null));
         if (engine == null || engine == currentEngine) return;
         currentEngine = engine;
         disposeViewer();
@@ -182,6 +186,26 @@ public class SwitchingViewer extends Composite {
             // created viewer reflects the same colors the previous
             // engine showed.
             nvlViewer.applyNodeColors(resolveEffective(currentNodeConfig, currentLeidenColors));
+        } else if (engine == GraphEngine.THREE_FORCE_GRAPH) {
+            threeForceGraphViewer = new ThreeForceGraphViewer(this, SWT.NONE);
+            wireViewer(threeForceGraphViewer);
+            if (currentData != null) threeForceGraphViewer.setGraphData(currentData);
+            if (currentNodeConfig != null) threeForceGraphViewer.setNodeConfig(currentNodeConfig);
+            if (currentLayout.isSupportedByThreeForceGraph()) {
+                threeForceGraphViewer.setLayout(currentLayout);
+            } else {
+                // Previous engine's layout isn't supported by 3D —
+                // fall back to the 3D-friendly default (FORCE_3D).
+                threeForceGraphViewer.setLayout(LayoutAlgorithm.FORCE_3D);
+                this.currentLayout = LayoutAlgorithm.FORCE_3D;
+            }
+            if (!currentLeidenColors.isEmpty()) {
+                threeForceGraphViewer.setLeidenClusterColors(currentLeidenColors);
+            }
+            if (!currentColorPalette.isEmpty()) {
+                threeForceGraphViewer.applyGraphPalette(currentColorPalette);
+            }
+            threeForceGraphViewer.applyNodeColors(resolveEffective(currentNodeConfig, currentLeidenColors));
         } else {
             visViewer = new GraphViewer(this, SWT.NONE);
             wireViewer(visViewer);
@@ -199,14 +223,16 @@ public class SwitchingViewer extends Composite {
             setContextMenuProvider(currentContextMenuProvider);
         }
         // Re-apply the legend AFTER everything else so the panel sits on top
-        // of the freshly-applied data and styles. Sigma and Cytoscape are
-        // excluded from this path: their Color Palette is auto-managed by
-        // the bridge from the per-node color maps (applyNodeColors /
+        // of the freshly-applied data and styles. Sigma, Cytoscape, NVL and
+        // 3D are excluded from this path: their Color Palette is auto-managed
+        // by the bridge from the per-node color maps (applyNodeColors /
         // setLeidenClusterColors) and does not respond to manual
-        // setLegend() pushes. NVL never had a legend API to begin with.
+        // setLegend() pushes.
         if (legendEnabled && visViewer != null
                 && currentEngine != GraphEngine.SIGMA
-                && currentEngine != GraphEngine.CYTOSCAPE) {
+                && currentEngine != GraphEngine.CYTOSCAPE
+                && currentEngine != GraphEngine.NEO4J_NVL
+                && currentEngine != GraphEngine.THREE_FORCE_GRAPH) {
             visViewer.setLegend(currentLegend, true);
         }
         // Re-apply the community-aggregation view (Cytoscape only) so a
@@ -258,6 +284,11 @@ public class SwitchingViewer extends Composite {
             if (!currentColorPalette.isEmpty()) {
                 nvlViewer.applyGraphPalette(currentColorPalette);
             }
+        } else if (currentEngine == GraphEngine.THREE_FORCE_GRAPH && threeForceGraphViewer != null) {
+            threeForceGraphViewer.setGraphData(data);
+            if (!currentColorPalette.isEmpty()) {
+                threeForceGraphViewer.applyGraphPalette(currentColorPalette);
+            }
         } else if (visViewer != null) {
             visViewer.setGraphData(data);
         }
@@ -275,6 +306,9 @@ public class SwitchingViewer extends Composite {
         } else if (currentEngine == GraphEngine.NEO4J_NVL && nvlViewer != null) {
             nvlViewer.setNodeConfig(config);
             nvlViewer.applyNodeColors(resolveEffective(config, currentLeidenColors));
+        } else if (currentEngine == GraphEngine.THREE_FORCE_GRAPH && threeForceGraphViewer != null) {
+            threeForceGraphViewer.setNodeConfig(config);
+            threeForceGraphViewer.applyNodeColors(resolveEffective(config, currentLeidenColors));
         } else if (visViewer != null) {
             visViewer.setNodeConfig(config);
             visViewer.applyNodeColors(resolveEffective(config, currentLeidenColors));
@@ -316,6 +350,8 @@ public class SwitchingViewer extends Composite {
             sigmaViewer.applyNodeColors(effective);
         } else if (currentEngine == GraphEngine.NEO4J_NVL && nvlViewer != null) {
             nvlViewer.applyNodeColors(effective);
+        } else if (currentEngine == GraphEngine.THREE_FORCE_GRAPH && threeForceGraphViewer != null) {
+            threeForceGraphViewer.applyNodeColors(effective);
         } else if (visViewer != null) {
             visViewer.applyNodeColors(effective);
         }
@@ -342,6 +378,9 @@ public class SwitchingViewer extends Composite {
         if (currentEngine == GraphEngine.NEO4J_NVL && nvlViewer != null) {
             return nvlViewer.getNodeConfig();
         }
+        if (currentEngine == GraphEngine.THREE_FORCE_GRAPH && threeForceGraphViewer != null) {
+            return threeForceGraphViewer.getNodeConfig();
+        }
         if (visViewer != null) {
             return visViewer.getNodeConfig();
         }
@@ -360,6 +399,8 @@ public class SwitchingViewer extends Composite {
             if (algorithm.isSupportedBySigma()) sigmaViewer.setLayout(algorithm);
         } else if (currentEngine == GraphEngine.NEO4J_NVL && nvlViewer != null) {
             if (algorithm.isSupportedByNvl()) nvlViewer.setLayout(algorithm);
+        } else if (currentEngine == GraphEngine.THREE_FORCE_GRAPH && threeForceGraphViewer != null) {
+            if (algorithm.isSupportedByThreeForceGraph()) threeForceGraphViewer.setLayout(algorithm);
         } else if (visViewer != null) {
             if (algorithm.isSupportedByVisNetwork()) visViewer.setLayout(algorithm);
         }
@@ -373,6 +414,8 @@ public class SwitchingViewer extends Composite {
             cytoscapeViewer.setLayoutOptions(currentLayoutOptions);
         } else if (currentEngine == GraphEngine.SIGMA && sigmaViewer != null) {
             sigmaViewer.setLayoutOptions(currentLayoutOptions);
+        } else if (currentEngine == GraphEngine.THREE_FORCE_GRAPH && threeForceGraphViewer != null) {
+            // 3D has no layout-option object — silently ignored.
         } else if (visViewer != null) {
             visViewer.setLayoutOptions(currentLayoutOptions);
         }
@@ -390,6 +433,9 @@ public class SwitchingViewer extends Composite {
         } else if (currentEngine == GraphEngine.NEO4J_NVL && nvlViewer != null) {
             nvlViewer.setLeidenClusterColors(currentLeidenColors);
             nvlViewer.applyNodeColors(resolveEffective(currentNodeConfig, currentLeidenColors));
+        } else if (currentEngine == GraphEngine.THREE_FORCE_GRAPH && threeForceGraphViewer != null) {
+            threeForceGraphViewer.setLeidenClusterColors(currentLeidenColors);
+            threeForceGraphViewer.applyNodeColors(resolveEffective(currentNodeConfig, currentLeidenColors));
         } else if (visViewer != null) {
             visViewer.setLeidenClusterColors(currentLeidenColors);
             visViewer.applyNodeColors(resolveEffective(currentNodeConfig, currentLeidenColors));
@@ -495,7 +541,9 @@ public class SwitchingViewer extends Composite {
         this.currentLegend = entries == null ? List.of() : List.copyOf(entries);
         this.legendEnabled = enabled;
         if (visViewer != null && currentEngine != GraphEngine.SIGMA
-                && currentEngine != GraphEngine.CYTOSCAPE) {
+                && currentEngine != GraphEngine.CYTOSCAPE
+                && currentEngine != GraphEngine.NEO4J_NVL
+                && currentEngine != GraphEngine.THREE_FORCE_GRAPH) {
             visViewer.setLegend(currentLegend, enabled);
         }
     }
@@ -505,7 +553,9 @@ public class SwitchingViewer extends Composite {
         this.currentLegend = List.of();
         this.legendEnabled = false;
         if (visViewer != null && currentEngine != GraphEngine.SIGMA
-                && currentEngine != GraphEngine.CYTOSCAPE) {
+                && currentEngine != GraphEngine.CYTOSCAPE
+                && currentEngine != GraphEngine.NEO4J_NVL
+                && currentEngine != GraphEngine.THREE_FORCE_GRAPH) {
             visViewer.clearLegend();
         }
     }
@@ -527,6 +577,8 @@ public class SwitchingViewer extends Composite {
             sigmaViewer.fitToScreen();
         } else if (currentEngine == GraphEngine.NEO4J_NVL && nvlViewer != null) {
             nvlViewer.fitToScreen();
+        } else if (currentEngine == GraphEngine.THREE_FORCE_GRAPH && threeForceGraphViewer != null) {
+            threeForceGraphViewer.fitToScreen();
         } else if (visViewer != null) {
             visViewer.fitToScreen();
         }
@@ -539,6 +591,8 @@ public class SwitchingViewer extends Composite {
             sigmaViewer.clear();
         } else if (currentEngine == GraphEngine.NEO4J_NVL && nvlViewer != null) {
             nvlViewer.clear();
+        } else if (currentEngine == GraphEngine.THREE_FORCE_GRAPH && threeForceGraphViewer != null) {
+            threeForceGraphViewer.clear();
         } else if (visViewer != null) {
             visViewer.clear();
         }
@@ -604,6 +658,7 @@ public class SwitchingViewer extends Composite {
         if (cytoscapeViewer != null) cytoscapeViewer.addNodeSelectionListener(l);
         if (sigmaViewer != null) sigmaViewer.addNodeSelectionListener(l);
         if (nvlViewer != null) nvlViewer.addNodeSelectionListener(l);
+        if (threeForceGraphViewer != null) threeForceGraphViewer.addNodeSelectionListener(l);
     }
 
     public void addRelationshipSelectionListener(RelationshipSelectionListener l) {
@@ -612,6 +667,7 @@ public class SwitchingViewer extends Composite {
         if (cytoscapeViewer != null) cytoscapeViewer.addRelationshipSelectionListener(l);
         if (sigmaViewer != null) sigmaViewer.addRelationshipSelectionListener(l);
         if (nvlViewer != null) nvlViewer.addRelationshipSelectionListener(l);
+        if (threeForceGraphViewer != null) threeForceGraphViewer.addRelationshipSelectionListener(l);
     }
 
     public void addSelectionClearedListener(SelectionClearedListener l) {
@@ -620,6 +676,7 @@ public class SwitchingViewer extends Composite {
         if (cytoscapeViewer != null) cytoscapeViewer.addSelectionClearedListener(l);
         if (sigmaViewer != null) sigmaViewer.addSelectionClearedListener(l);
         if (nvlViewer != null) nvlViewer.addSelectionClearedListener(l);
+        if (threeForceGraphViewer != null) threeForceGraphViewer.addSelectionClearedListener(l);
     }
 
     public void setContextMenuProvider(ContextMenuProvider provider) {
@@ -628,6 +685,7 @@ public class SwitchingViewer extends Composite {
         if (cytoscapeViewer != null) cytoscapeViewer.setContextMenuProvider(provider);
         if (sigmaViewer != null) sigmaViewer.setContextMenuProvider(provider);
         if (nvlViewer != null) nvlViewer.setContextMenuProvider(provider);
+        if (threeForceGraphViewer != null) threeForceGraphViewer.setContextMenuProvider(provider);
     }
 
     /* ---- internals ---- */
@@ -659,6 +717,12 @@ public class SwitchingViewer extends Composite {
         for (SelectionClearedListener l : clearedListeners) v.addSelectionClearedListener(l);
     }
 
+    private void wireViewer(ThreeForceGraphViewer v) {
+        for (NodeSelectionListener l : nodeListeners) v.addNodeSelectionListener(l);
+        for (RelationshipSelectionListener l : relListeners) v.addRelationshipSelectionListener(l);
+        for (SelectionClearedListener l : clearedListeners) v.addSelectionClearedListener(l);
+    }
+
     private void disposeViewer() {
         if (visViewer != null && !visViewer.isDisposed()) {
             visViewer.dispose();
@@ -676,6 +740,10 @@ public class SwitchingViewer extends Composite {
             nvlViewer.dispose();
         }
         nvlViewer = null;
+        if (threeForceGraphViewer != null && !threeForceGraphViewer.isDisposed()) {
+            threeForceGraphViewer.dispose();
+        }
+        threeForceGraphViewer = null;
     }
 
     @Override

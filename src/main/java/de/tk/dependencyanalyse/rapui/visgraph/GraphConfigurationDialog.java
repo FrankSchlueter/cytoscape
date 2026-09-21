@@ -1415,6 +1415,7 @@ public class GraphConfigurationDialog extends Dialog {
             case CYTOSCAPE:    return "Cytoscape (kein Effekt — Color Palette wird automatisch verwaltet)";
             case SIGMA:        return "Sigma (kein Effekt — Color Palette wird automatisch verwaltet)";
             case NEO4J_NVL:    return "NVL (kein Effekt — Color Palette wird automatisch verwaltet)";
+            case THREE_FORCE_GRAPH: return "3D Force (kein Effekt — Color Palette wird automatisch verwaltet)";
             default:           return "den aktiven Viewer";
         }
     }

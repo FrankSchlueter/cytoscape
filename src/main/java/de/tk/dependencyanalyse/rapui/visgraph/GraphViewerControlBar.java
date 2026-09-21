@@ -155,22 +155,25 @@ public class GraphViewerControlBar extends Composite {
         Label lblEngine = new Label(this, SWT.NONE);
         lblEngine.setText("Engine:");
         engineCombo = new Combo(this, SWT.READ_ONLY | SWT.DROP_DOWN);
-        engineCombo.setItems(new String[] {  "Nvl", "Cytoscape", "Sigma","Vis" });
-        if( switching.getEngine() == GraphEngine.NEO4J_NVL ) {
+        engineCombo.setItems(new String[] { "Nvl", "3D", "Cytoscape", "Sigma", "Vis" });
+        if (switching.getEngine() == GraphEngine.NEO4J_NVL) {
             engineCombo.select(0);
-        } else if( switching.getEngine() == GraphEngine.CYTOSCAPE ) {
+        } else if (switching.getEngine() == GraphEngine.THREE_FORCE_GRAPH) {
             engineCombo.select(1);
-        } else if( switching.getEngine() == GraphEngine.SIGMA ) {
+        } else if (switching.getEngine() == GraphEngine.CYTOSCAPE) {
             engineCombo.select(2);
-        } else {
+        } else if (switching.getEngine() == GraphEngine.SIGMA) {
             engineCombo.select(3);
+        } else {
+            engineCombo.select(4);
         }
         engineCombo.addSelectionListener(new SelectionAdapter() {
             @Override public void widgetSelected(SelectionEvent e) {
                 int idx = engineCombo.getSelectionIndex();
                 if (idx == 0) switching.switchTo(GraphEngine.NEO4J_NVL);
-                else if (idx == 1) switching.switchTo(GraphEngine.CYTOSCAPE);
-                else if (idx == 2) switching.switchTo(GraphEngine.SIGMA);
+                else if (idx == 1) switching.switchTo(GraphEngine.THREE_FORCE_GRAPH);
+                else if (idx == 2) switching.switchTo(GraphEngine.CYTOSCAPE);
+                else if (idx == 3) switching.switchTo(GraphEngine.SIGMA);
                 else switching.switchTo(GraphEngine.VIS_NETWORK);
             }
         });
@@ -191,11 +194,12 @@ public class GraphViewerControlBar extends Composite {
             }
         });
 
-        /* ---- Physics (vis-only) ---- */
+        /* ---- Physics (vis-network + 3D only) ---- */
         physicsButton = new Button(this, SWT.CHECK);
         physicsButton.setText("Physics");
         physicsButton.setSelection(viewer.isPhysicsEnabled());
-        physicsButton.setEnabled(switching.getEngine() == GraphEngine.VIS_NETWORK);
+        physicsButton.setEnabled(switching.getEngine() == GraphEngine.VIS_NETWORK
+                || switching.getEngine() == GraphEngine.THREE_FORCE_GRAPH);
         physicsButton.addSelectionListener(new SelectionAdapter() {
             @Override public void widgetSelected(SelectionEvent e) {
                 // Forward the check state to the active engine.
@@ -384,23 +388,27 @@ public class GraphViewerControlBar extends Composite {
         supportedLayouts = currentLayoutsFor(engine);
         layoutCombo.setItems(displayNamesFor(supportedLayouts));
         layoutCombo.select(defaultLayoutIndex(supportedLayouts));
-        // Only vis-network has the Physics + AutoFit concepts. Cytoscape's
-        // fcose layout always runs with fit:true and ignores the AutoFit
-        // toggle. Sigma runs FA2 once per layout command — there is no
-        // continuous physics state to toggle — so both buttons stay
-        // disabled there too.
+        // Physics toggle is meaningful for vis-network (continuous physics
+        // simulation) and the 3D Force-Directed Graph (animation pause/resume).
+        // Cytoscape's fcose layout always runs with fit:true and ignores the
+        // AutoFit toggle. Sigma runs FA2 once per layout command — there is
+        // no continuous physics state to toggle — so both buttons stay
+        // disabled there.
         boolean isVis = engine == GraphEngine.VIS_NETWORK;
-        physicsButton.setEnabled(isVis);
+        boolean isThreeForce = engine == GraphEngine.THREE_FORCE_GRAPH;
+        physicsButton.setEnabled(isVis || isThreeForce);
         autoFitButton.setEnabled(isVis);
         // Reflect the new engine in the engine combo.
         if (engine == GraphEngine.SIGMA) {
-            engineCombo.select(2);
+            engineCombo.select(3);
         } else if (engine == GraphEngine.CYTOSCAPE) {
+            engineCombo.select(2);
+        } else if (engine == GraphEngine.THREE_FORCE_GRAPH) {
             engineCombo.select(1);
-         } else if (engine == GraphEngine.NEO4J_NVL) {
+        } else if (engine == GraphEngine.NEO4J_NVL) {
             engineCombo.select(0);
         } else {
-            engineCombo.select(3);
+            engineCombo.select(4);
         }
         // Apply a default layout for the new engine if the previous one
         // isn't supported.
@@ -417,6 +425,8 @@ public class GraphViewerControlBar extends Composite {
             return LayoutAlgorithm.valuesForSigma();
         } else if (engine == GraphEngine.NEO4J_NVL) {
             return LayoutAlgorithm.valuesForNvl();
+        } else if (engine == GraphEngine.THREE_FORCE_GRAPH) {
+            return LayoutAlgorithm.valuesForThreeForceGraph();
         } else {
             return LayoutAlgorithm.valuesForVisNetwork();
         }
@@ -428,8 +438,15 @@ public class GraphViewerControlBar extends Composite {
         // aware ForceAtlas2 equivalent and the engine-recommended default).
         // First preference for cytoscape: LEIDEN_GRID → NULL → FCOSE (the
         // existing cytoscape fallback chain is preserved).
+        // First preference for the 3D Force-Directed Graph engine:
+        // FORCE_3D (running force layout). The enum declaration order puts
+        // NONE before FORCE_3D, so without this rule the default would
+        // silently land on the paused-animation option.
         for (int i = 0; i < layouts.length; i++) {
             if (layouts[i] == LayoutAlgorithm.FORCE_DIRECTED_2_SIGMA) return i;
+        }
+        for (int i = 0; i < layouts.length; i++) {
+            if (layouts[i] == LayoutAlgorithm.FORCE_3D) return i;
         }
         for (int i = 0; i < layouts.length; i++) {
             if (layouts[i] == LayoutAlgorithm.BARNES_HUT) return i;
@@ -481,6 +498,7 @@ public class GraphViewerControlBar extends Composite {
             case NOVERLAP_SIGMA:            return "Sigma NoOverlap";
             case CIRCULAR_SIGMA:            return "Sigma Circular";
             case RANDOM_SIGMA:              return "Sigma Random";
+            case FORCE_3D:                  return "3D Force";
             default:                    return a.name();
         }
     }

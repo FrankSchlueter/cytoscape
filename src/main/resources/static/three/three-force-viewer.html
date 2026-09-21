@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>3D Force Graph Viewer</title>
+<link rel="stylesheet" href="/three/three-force-viewer.css">
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #fafafa;
+    font-family: Segoe UI, Arial, sans-serif;
+  }
+</style>
+</head>
+<body>
+<div id="tfg-root"></div>
+<div id="tfg-error" style="display:none; padding:24px; color:#b00020; font-family:Segoe UI,Arial,sans-serif;">
+  <h2>WebGL nicht verfügbar</h2>
+  <p>3D Force-Directed Graph benötigt eine WebGL-fähige Browser-Engine. Bitte verwenden Sie eine andere Rendering-Engine.</p>
+</div>
+<script src="/three/three.min.js"></script>
+<script src="/three/kapsule.min.js"></script>
+<script src="/three/d3-force-3d.min.js"></script>
+<script src="/three/three-force-graph.min.js"></script>
+<script src="/three/three-force-viewer.js"></script>
+</body>
+</html>

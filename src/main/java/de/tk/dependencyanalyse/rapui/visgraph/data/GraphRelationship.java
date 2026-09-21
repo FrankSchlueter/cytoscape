@@ -295,6 +295,55 @@ public final class GraphRelationship {
     }
 
     /**
+     * Build the link payload consumed by the 3D Force-Directed Graph bridge.
+     *
+     * <p>3d-force-graph link shape: {@code { id, source, target, type, color?, properties?, weight?, logWeight? }}.
+     * Mirrors {@link #toNvlData()} but uses {@code source}/{@code target} (the
+     * d3-force-3d convention) instead of NVL's {@code from}/{@code to}.
+     * Non-string property values are coerced to strings (same safety measure
+     * as the NVL serializer).</p>
+     *
+     * <p>{@code weight} and the pre-computed {@code logWeight} are surfaced
+     * at the top level of the payload — same pattern as
+     * {@link #toVisNetworkData()} and {@link #toCytoscapeEdge()} — so the
+     * JS bridge can drive {@code d3Force('link').distance(...)} and
+     * {@code linkWidth(...)} without dereferencing the {@code properties}
+     * map. Missing / non-positive weight → both fields are omitted; the JS
+     * side falls back to its own defaults.</p>
+     */
+    public Map<String, Object> toThreeForceGraphLink() {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("id", id);
+        out.put("source", sourceNode.getId());
+        out.put("target", targetNode.getId());
+        out.put("type", type);
+        Double w = getWeight();
+        if (w != null && w > 0) {
+            out.put("weight", w);
+            out.put("logWeight", Math.log10(w + 1.0));
+        }
+        if (!properties.isEmpty()) {
+            Map<String, Object> safeProps = new LinkedHashMap<>(properties.size());
+            for (Map.Entry<String, Object> e : properties.entrySet()) {
+                Object v = e.getValue();
+                safeProps.put(e.getKey(), v == null ? null : (v instanceof String ? v : v.toString()));
+            }
+            out.put("properties", safeProps);
+        }
+        for (Map.Entry<String, Object> e : visualAttrs.entrySet()) {
+            String k = e.getKey();
+            if ("label".equals(k) || "title".equals(k)) continue;
+            if ("color".equals(k)) {
+                String flat = ColorSpec.toNvlString(e.getValue());
+                if (flat != null) out.put("color", flat);
+                continue;
+            }
+            out.put(k, e.getValue());
+        }
+        return out;
+    }
+
+    /**
      * Serializes the relationship as a Cytoscape.js element entry:
      * {@code { data: { id, source, target, type, label?, weight?, ...all-properties } }}.
      *

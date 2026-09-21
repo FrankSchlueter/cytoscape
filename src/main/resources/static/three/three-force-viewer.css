@@ -1,0 +1,134 @@
+#tfg-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: #fafafa;
+  overflow: hidden;
+}
+
+#tfg-canvas-wrap {
+  position: absolute;
+  inset: 0;
+}
+
+/* Tooltip - NVL-parity, position:fixed */
+#tfg-tooltip {
+  position: fixed;
+  z-index: 10002;
+  pointer-events: none;
+  display: none;
+  max-width: 360px;
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid #c0c0c0;
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-family: Segoe UI, Arial, sans-serif;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #222;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.18);
+}
+#tfg-tooltip .tfg-tt-caption {
+  font-weight: bold;
+  color: #111;
+  margin-bottom: 2px;
+}
+#tfg-tooltip .tfg-tt-sub {
+  color: #666;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+#tfg-tooltip .tfg-tt-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+#tfg-tooltip .tfg-tt-table td {
+  padding: 1px 4px;
+  vertical-align: top;
+  font-size: 11px;
+}
+#tfg-tooltip .tfg-tt-table td.tfg-tt-key {
+  color: #555;
+  font-weight: 600;
+  white-space: nowrap;
+  padding-right: 8px;
+}
+#tfg-tooltip .tfg-tt-table td.tfg-tt-val {
+  color: #222;
+  word-break: break-word;
+}
+
+/* Color Palette panel - NVL-parity top-right */
+#tfg-color-palette {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 10001;
+  min-width: 200px;
+  max-width: 320px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #c0c0c0;
+  border-radius: 4px;
+  font-family: Segoe UI, Arial, sans-serif;
+  font-size: 12px;
+  color: #222;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+}
+#tfg-color-palette .tfg-cp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid #e0e0e0;
+  font-weight: 600;
+  background: #f5f5f5;
+  border-radius: 4px 4px 0 0;
+}
+#tfg-color-palette .tfg-cp-toggle {
+  cursor: pointer;
+  user-select: none;
+  padding: 0 4px;
+  color: #555;
+}
+#tfg-color-palette .tfg-cp-body {
+  padding: 4px 0;
+}
+#tfg-color-palette.tfg-cp-collapsed .tfg-cp-body {
+  display: none;
+}
+#tfg-color-palette .tfg-cp-row {
+  display: flex;
+  align-items: center;
+  padding: 3px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+#tfg-color-palette .tfg-cp-row:hover {
+  background: #f0f0f0;
+}
+#tfg-color-palette .tfg-cp-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  margin-right: 8px;
+  border: 1px solid rgba(0,0,0,0.15);
+  flex-shrink: 0;
+}
+#tfg-color-palette .tfg-cp-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#tfg-color-palette .tfg-cp-count {
+  color: #888;
+  font-size: 11px;
+  margin-left: 6px;
+}
+#tfg-color-palette .tfg-cp-empty {
+  padding: 8px 10px;
+  color: #999;
+  font-style: italic;
+}

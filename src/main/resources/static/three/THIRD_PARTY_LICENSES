@@ -1,0 +1,39 @@
+THIRD-PARTY LICENSES — 3D Force-Directed Graph Bundle
+======================================================
+
+This directory bundles the following third-party JavaScript libraries, all
+under permissive open-source licenses. They are loaded as <script> tags from
+three-force-viewer.html and are required at runtime.
+
+--------------------------------------------------------------------------------
+1. three.js (core renderer)
+   Source : https://github.com/mrdoob/three.js/
+   Bundled: three.min.js
+   Version: 0.160.0
+   License: MIT — Copyright (c) 2010–present three.js authors / mrdoob
+
+--------------------------------------------------------------------------------
+2. kapsule (component-wrapper used by 3d-force-graph)
+   Source : https://github.com/vasturiano/kapsule
+   Bundled: kapsule.min.js
+   Version: 1.14.5
+   License: MIT — Copyright (c) 2020 Alessandro Apr\u2026
+
+--------------------------------------------------------------------------------
+3. d3-force-3d (3D force layout solver)
+   Source : https://github.com/vasturiano/d3-force-3d
+   Bundled: d3-force-3d.min.js
+   Version: 3.0.5
+   License: MIT — Copyright (c) 2020 Alessandro Apr\u2026
+
+--------------------------------------------------------------------------------
+4. 3d-force-graph (3D force-directed graph renderer)
+   Source : https://github.com/vasturiano/3d-force-graph
+   Bundled: three-force-graph.min.js
+   Version: 1.73.0
+   License: MIT — Copyright (c) 2020 Alessandro Apr\u2026
+
+--------------------------------------------------------------------------------
+All libraries above are MIT-licensed and may be redistributed in source or
+binary form provided that the copyright notice and permission notice are
+reproduced. See https://opensource.org/licenses/MIT for the full license text.

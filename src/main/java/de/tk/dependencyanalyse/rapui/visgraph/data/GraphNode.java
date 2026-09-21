@@ -1112,6 +1112,41 @@ private static final String SVG_IMAGE_2 = "svgImage2";
 	}
 
 	/**
+	 * Build the node payload consumed by the 3D Force-Directed Graph bridge.
+	 *
+	 * <p>3d-force-graph node shape: {@code { id, labels?, properties?, caption?, color? }}.
+	 * Mirrors {@link #toNvlNode()} but without the NVL-specific
+	 * {@code overlayIcon}/{@code captionAlign} slots — those concepts have no
+	 * equivalent in the 3D renderer (nodes are WebGL spheres whose texture /
+	 * color is driven entirely by the {@code color} field).</p>
+	 */
+	public Map<String, Object> toThreeForceGraphNode() {
+		Map<String, Object> out = new LinkedHashMap<>();
+		out.put("id", id);
+		if (!labels.isEmpty()) {
+			out.put("labels", labels);
+		}
+		if (!properties.isEmpty()) {
+			Map<String, Object> safeProps = new LinkedHashMap<>(properties.size());
+			for (Map.Entry<String, Object> e : properties.entrySet()) {
+				Object v = e.getValue();
+				safeProps.put(e.getKey(), v == null ? null : (v instanceof String ? v : v.toString()));
+			}
+			out.put("properties", safeProps);
+		}
+		String caption = getCaption();
+		if (caption != null && !caption.isEmpty()) {
+			out.put("caption", caption);
+		}
+		Object rawColor = visualAttrs.get("color");
+		String fgColor = ColorSpec.toNvlString(rawColor);
+		if (fgColor != null) {
+			out.put("color", fgColor);
+		}
+		return out;
+	}
+
+	/**
 	 * Build the {@code data.image} payload consumed by the Cytoscape bridge.
 	 *
 	 * <p>
