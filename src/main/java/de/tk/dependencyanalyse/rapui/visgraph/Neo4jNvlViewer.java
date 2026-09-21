@@ -107,14 +107,16 @@ public class Neo4jNvlViewer extends Browser {
             bridge.setCurrentData(data);
             bridge.applyData(data);
             // Auto-push the per-node color palette that travels with the
-            // graph. setLeidenColors(...) drives refreshPalette() which
-            // derives panel entries via LegendBuilder.fromLeidenClusters
-            // and pushes vgv_applyColorPalette(entries, true) — so the
-            // Color Palette panel appears automatically for every NVL
-            // graph that declares a non-empty palette.
+            // graph. applyGraphPalette(...) drives refreshPalette() which
+            // derives panel entries via LegendBuilder.fromGraphPalette
+            // (preserving the caller's keys as labels) and pushes
+            // vgv_applyColorPalette(entries, true) — so the Color Palette
+            // panel appears automatically for every NVL graph that
+            // declares a non-empty palette, without renaming labels to
+            // "ClusterN" like the Leiden path does.
             Map<String, String> palette = data.getColorPalette();
             if (palette != null && !palette.isEmpty()) {
-                bridge.setLeidenColors(palette);
+                bridge.applyGraphPalette(palette);
             }
         });
     }
@@ -154,6 +156,21 @@ public class Neo4jNvlViewer extends Browser {
     public void setLeidenClusterColors(Map<String, String> colors) {
         if (colors == null) return;
         runWhenReady(() -> bridge.setLeidenColors(colors));
+    }
+
+    /**
+     * Push a graph-attached color palette (from {@link GraphData#getColorPalette})
+     * to the iframe without going through the Leiden cluster resolver.
+     *
+     * <p>Pairs with {@link SwitchingViewer#setGraphData} which forwards
+     * the palette on every {@code setGraphData(...)} call and on engine
+     * round-trips into NVL. The map keys are preserved verbatim as
+     * legend row labels (e.g. node id, cluster key, ...) so the panel
+     * matches the caller's intent.</p>
+     */
+    public void applyGraphPalette(Map<String, String> palette) {
+        if (palette == null) return;
+        runWhenReady(() -> bridge.applyGraphPalette(palette));
     }
 
     /**

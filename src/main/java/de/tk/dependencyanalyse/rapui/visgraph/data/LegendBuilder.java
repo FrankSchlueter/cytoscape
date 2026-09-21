@@ -39,6 +39,13 @@ import java.util.TreeSet;
  * the same hex color, the higher-priority source wins so the legend never
  * lists a color twice.</p>
  *
+ * <p>{@link #fromGraphPalette(GraphData, Map)} renders a palette attached
+ * directly to the graph (via {@link GraphData#setColorPalette}) without
+ * routing through the Leiden or tag resolvers — each map entry becomes
+ * one legend row whose label is the original map key. Used by
+ * {@code NvlJsBridge.applyGraphPalette(...)} so a non-resolver-driven
+ * palette appears in the iframe.</p>
+ *
  * <p>All methods are null-safe: {@code null} arguments yield an empty list.</p>
  *
  * <p>Output is deterministic for a fixed input graph and config (same
@@ -162,6 +169,48 @@ public final class LegendBuilder {
     /* ============================================================== */
     /*  Combined                                                       */
     /* ============================================================== */
+
+    /**
+     * Build a legend from the graph-attached color palette set via
+     * {@link GraphData#setColorPalette}.
+     *
+     * <p>Unlike {@link #fromLeidenClusters} / {@link #fromTagValues} this
+     * builder does <b>not</b> rewrite the user-supplied labels to
+     * {@code "ClusterN"} / {@code "property: value"}. Each map entry
+     * becomes one legend row preserving the original key as the label.
+     * Iteration order follows the caller's {@link Map} entry order so a
+     * {@link LinkedHashMap} caller keeps the visible order they specified.</p>
+     *
+     * <p>The node count for each row is derived from the graph itself:
+     * it is the number of {@link GraphNode}s whose id appears in the
+     * palette map. This works regardless of whether the caller has set
+     * a per-node {@code color} via {@link GraphNode#setColor} — the
+     * palette map is the single source of truth.</p>
+     *
+     * @param data    graph (used to derive per-color counts); may be {@code null}
+     * @param palette map of nodeId (or any opaque key) → hex color;
+     *                may be {@code null} or empty
+     * @return one entry per non-empty map entry, in the map's iteration order
+     */
+    public static List<LegendEntry> fromGraphPalette(GraphData data, Map<String, String> palette) {
+        if (palette == null || palette.isEmpty()) return List.of();
+        Map<String, Integer> countByKey = new LinkedHashMap<>();
+        if (data != null) {
+            for (GraphNode n : data.getNodes()) {
+                if (palette.containsKey(n.getId())) {
+                    countByKey.merge(n.getId(), 1, Integer::sum);
+                }
+            }
+        }
+        List<LegendEntry> out = new ArrayList<>(palette.size());
+        for (Map.Entry<String, String> e : palette.entrySet()) {
+            String key = e.getKey();
+            String hex = e.getValue();
+            if (hex == null || hex.isEmpty()) continue;
+            out.add(new LegendEntry(hex, key, countByKey.getOrDefault(key, 0)));
+        }
+        return out;
+    }
 
     /**
      * Combined legend: Tag → Cluster → NodeType.

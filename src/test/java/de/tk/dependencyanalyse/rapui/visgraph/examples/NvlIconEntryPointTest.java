@@ -253,9 +253,13 @@ class NvlIconEntryPointTest {
         String body = nvlViewer.substring(idx, end);
         assertTrue(body.contains("data.getColorPalette()"),
                 "Neo4jNvlViewer.setGraphData must read the palette from data.getColorPalette()");
-        assertTrue(body.contains("bridge.setLeidenColors("),
-                "Neo4jNvlViewer.setGraphData must push the palette via bridge.setLeidenColors(...) "
-                        + "so the NVL Color Palette panel appears");
+        // The graph-attached palette routes through bridge.applyGraphPalette(...)
+        // (NOT bridge.setLeidenColors(...)) so the original map keys survive as
+        // legend row labels instead of being renamed to "ClusterN" by the
+        // Leiden resolver.
+        assertTrue(body.contains("bridge.applyGraphPalette("),
+                "Neo4jNvlViewer.setGraphData must push the palette via bridge.applyGraphPalette(...) "
+                        + "so the NVL Color Palette panel appears with the caller's labels");
 
         Path nvlBridgeSrc = Paths.get(
                 "src/main/java/de/tk/dependencyanalyse/rapui/visgraph/internal/NvlJsBridge.java");
@@ -272,6 +276,16 @@ class NvlIconEntryPointTest {
                         + "so the palette panel is auto-shown");
         assertTrue(bridBody.contains("window.vgv_applyLeidenColors("),
                 "NvlJsBridge.setLeidenColors must push vgv_applyLeidenColors to the iframe");
+        // applyGraphPalette must also exist and route through refreshPalette.
+        assertTrue(nvlBridge.contains("public void applyGraphPalette("),
+                "NvlJsBridge.applyGraphPalette(...) must exist so the graph-attached palette "
+                        + "is pushed without going through the Leiden resolver");
+        int gpIdx = nvlBridge.indexOf("public void applyGraphPalette(");
+        int gpEnd = nvlBridge.indexOf("public void clear(", gpIdx);
+        String gpBody = nvlBridge.substring(gpIdx, gpEnd);
+        assertTrue(gpBody.contains("refreshPalette("),
+                "NvlJsBridge.applyGraphPalette must invoke refreshPalette() "
+                        + "so the panel re-derives entries from the cached maps");
 
         Path nvlJs = Paths.get("src/main/resources/static/nvl/nvl-graph-viewer.js");
         String nvlJsSrc = Files.exists(nvlJs)

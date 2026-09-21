@@ -62,6 +62,8 @@ public final class NvlJsBridge {
     private volatile Map<String, String> currentLeidenColors = Map.of();
     /** Last effective color map pushed via {@link #applyNodeColors}. */
     private volatile Map<String, String> currentEffectiveColors = Map.of();
+    /** Last graph-attached palette pushed via {@link #applyGraphPalette}. */
+    private volatile Map<String, String> currentGraphPalette = Map.of();
     /** True when the palette panel should be visible. */
     private volatile boolean paletteVisible = false;
 
@@ -122,18 +124,22 @@ public final class NvlJsBridge {
      * <ul>
      *   <li>{@link #applyNodeColors} with a non-empty map → palette
      *       shown with entries from {@link LegendBuilder#combined};</li>
+     *   <li>{@link #applyGraphPalette} with a non-empty map → palette
+     *       shown with entries from {@link LegendBuilder#fromGraphPalette}
+     *       (uses the original map keys as labels);</li>
      *   <li>{@link #setLeidenColors} with a non-empty map → palette
      *       shown with entries from {@link LegendBuilder#fromLeidenClusters};</li>
-     *   <li>both maps empty → palette hidden.</li>
+     *   <li>all maps empty → palette hidden.</li>
      * </ul>
      *
      * <p>The panel does NOT survive a {@link #clear()} call — that path
-     * resets both cached maps and pushes {@code vgv_hideColorPalette}.</p>
+     * resets all cached maps and pushes {@code vgv_hideColorPalette}.</p>
      */
     private void refreshPalette() {
         Map<String, String> effective = currentEffectiveColors;
+        Map<String, String> graph = currentGraphPalette;
         Map<String, String> leiden = currentLeidenColors;
-        boolean anyColors = !effective.isEmpty() || !leiden.isEmpty();
+        boolean anyColors = !effective.isEmpty() || !graph.isEmpty() || !leiden.isEmpty();
         if (!anyColors) {
             if (paletteVisible) {
                 paletteVisible = false;
@@ -141,7 +147,7 @@ public final class NvlJsBridge {
             }
             return;
         }
-        List<LegendEntry> entries = derivePaletteEntries(effective, leiden);
+        List<LegendEntry> entries = derivePaletteEntries(effective, graph, leiden);
         paletteVisible = true;
         exec("window.vgv_applyColorPalette(" + gson.toJson(entries) + ", true);");
     }
@@ -151,14 +157,18 @@ public final class NvlJsBridge {
      * color maps. {@link LegendBuilder#combined} already merges all
      * three sources (Tag → Cluster → NodeType) and dedups by hex, so
      * passing both maps there yields the richest labels. When the
-     * effective map is empty we fall back to the pure Leiden builder
-     * (still produces "Cluster N" labels) and finally to a generic
-     * "Color N" derivation in the iframe for the no-config case.
+     * effective map is empty we fall back to the graph-attached palette
+     * (preserves the caller's labels verbatim) and finally to the
+     * Leiden builder (still produces "Cluster N" labels).
      */
     private List<LegendEntry> derivePaletteEntries(Map<String, String> effective,
+                                                     Map<String, String> graph,
                                                      Map<String, String> leiden) {
         if (!effective.isEmpty()) {
             return LegendBuilder.combined(currentData, currentNodeConfig, leiden);
+        }
+        if (!graph.isEmpty()) {
+            return LegendBuilder.fromGraphPalette(currentData, graph);
         }
         if (!leiden.isEmpty()) {
             return LegendBuilder.fromLeidenClusters(currentData, leiden);
@@ -217,6 +227,31 @@ public final class NvlJsBridge {
         refreshPalette();
     }
 
+    /**
+     * Push a graph-attached palette (per {@link GraphData#getColorPalette})
+     * to the iframe. The palette is rendered as-is — each map entry becomes
+     * one legend row whose label is the original map key (e.g. the node id
+     * or a cluster key supplied by the caller), without renaming to
+     * {@code "ClusterN"} like {@link #setLeidenColors} does.
+     *
+     * <p>Pairs with
+     * {@link de.tk.dependencyanalyse.rapui.visgraph.Neo4jNvlViewer#applyGraphPalette}
+     * which forwards the palette from {@link GraphData#getColorPalette()}
+     * to this method on engine construction and engine round-trips.</p>
+     *
+     * <p>An empty map clears the cached palette. The panel hides when all
+     * three cached maps ({@link #currentEffectiveColors},
+     * {@link #currentGraphPalette}, {@link #currentLeidenColors}) are
+     * empty, otherwise the graph palette is shown with a lower priority
+     * than {@code applyNodeColors} but higher than
+     * {@code setLeidenColors}.</p>
+     */
+    public void applyGraphPalette(Map<String, String> palette) {
+        Map<String, String> safe = palette == null ? Map.of() : palette;
+        this.currentGraphPalette = safe;
+        refreshPalette();
+    }
+
     public void clear() {
         // Drop cached color state so the auto-managed palette does not
         // resurrect after a clear(). Without this the next data load
@@ -224,6 +259,7 @@ public final class NvlJsBridge {
         // applyNodeColors call lands.
         this.currentLeidenColors = Map.of();
         this.currentEffectiveColors = Map.of();
+        this.currentGraphPalette = Map.of();
         this.paletteVisible = false;
         exec("window.vgv_clear();");
         exec("window.vgv_hideColorPalette();");

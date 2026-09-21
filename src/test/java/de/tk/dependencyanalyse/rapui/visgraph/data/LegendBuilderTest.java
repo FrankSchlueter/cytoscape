@@ -246,6 +246,88 @@ class LegendBuilderTest {
         assertEquals(0, LegendBuilder.combined(null, NodeConfig.defaults(), Map.of()).size());
     }
 
+    /* ===== fromGraphPalette ===== */
+
+    @Test
+    void fromGraphPalettePreservesMapKeysAsLabels() {
+        // The graph-attached palette must NOT rewrite labels to "ClusterN" —
+        // each map entry becomes one legend row with the original key as label.
+        GraphData data = LegendBuilder.graphOf(List.of(
+                LegendBuilder.node("n0", null, Map.of()),
+                LegendBuilder.node("n1", null, Map.of()),
+                LegendBuilder.node("n2", null, Map.of())
+        ));
+        Map<String, String> palette = new LinkedHashMap<>();
+        palette.put("n0", "#ff0000");
+        palette.put("n1", "#00ff00");
+        palette.put("n2", "#0000ff");
+
+        List<LegendEntry> legend = LegendBuilder.fromGraphPalette(data, palette);
+        assertEquals(3, legend.size());
+        // Iteration order matches the caller's LinkedHashMap insertion order.
+        assertEquals("n0", legend.get(0).label());
+        assertEquals("#ff0000", legend.get(0).colorHex());
+        assertEquals(1, legend.get(0).count());
+        assertEquals("n1", legend.get(1).label());
+        assertEquals("n2", legend.get(2).label());
+    }
+
+    @Test
+    void fromGraphPaletteCountsNodesWithMatchingId() {
+        // 3 nodes share the id "shared" → count = 3 for that row.
+        GraphData data = LegendBuilder.graphOf(List.of(
+                LegendBuilder.node("shared", null, Map.of()),
+                LegendBuilder.node("shared", null, Map.of()),
+                LegendBuilder.node("shared", null, Map.of()),
+                LegendBuilder.node("other", null, Map.of())
+        ));
+        Map<String, String> palette = new LinkedHashMap<>();
+        palette.put("shared", "#aaaaaa");
+        palette.put("other", "#bbbbbb");
+
+        List<LegendEntry> legend = LegendBuilder.fromGraphPalette(data, palette);
+        assertEquals(2, legend.size());
+        assertEquals(3, legend.get(0).count());
+        assertEquals(1, legend.get(1).count());
+    }
+
+    @Test
+    void fromGraphPaletteSkipsNullColors() {
+        Map<String, String> palette = new LinkedHashMap<>();
+        palette.put("n0", "#ff0000");
+        palette.put("n1", null);
+        palette.put("n2", "");
+
+        List<LegendEntry> legend = LegendBuilder.fromGraphPalette(null, palette);
+        assertEquals(1, legend.size());
+        assertEquals("n0", legend.get(0).label());
+    }
+
+    @Test
+    void fromGraphPaletteReturnsEmptyForNulls() {
+        assertEquals(0, LegendBuilder.fromGraphPalette(null, null).size());
+        assertEquals(0, LegendBuilder.fromGraphPalette(null, Map.of()).size());
+        GraphData data = LegendBuilder.graphOf(List.of(LegendBuilder.node("n0", null, Map.of())));
+        assertEquals(0, LegendBuilder.fromGraphPalette(data, null).size());
+        assertEquals(0, LegendBuilder.fromGraphPalette(data, Map.of()).size());
+    }
+
+    @Test
+    void fromGraphPaletteCountIsZeroWhenPaletteKeyHasNoMatchingNode() {
+        // Palette key "ghost" doesn't match any node id → count = 0 (not absent).
+        GraphData data = LegendBuilder.graphOf(List.of(
+                LegendBuilder.node("n0", null, Map.of())
+        ));
+        Map<String, String> palette = new LinkedHashMap<>();
+        palette.put("n0", "#ff0000");
+        palette.put("ghost", "#cccccc");
+
+        List<LegendEntry> legend = LegendBuilder.fromGraphPalette(data, palette);
+        assertEquals(2, legend.size());
+        assertEquals(1, legend.get(0).count());
+        assertEquals(0, legend.get(1).count());
+    }
+
     /* ===== LegendEntry record ===== */
 
     @Test

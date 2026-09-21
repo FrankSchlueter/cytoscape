@@ -171,9 +171,12 @@ public class SwitchingViewer extends Composite {
                 nvlViewer.setLeidenClusterColors(currentLeidenColors);
             }
             // Re-apply the graph-attached Color Palette so the panel
-            // reappears after an engine round-trip into NVL.
+            // reappears after an engine round-trip into NVL. Goes through
+            // applyGraphPalette (not setLeidenClusterColors) so the
+            // original map keys are preserved as panel labels instead
+            // of being renamed to "ClusterN" by the Leiden resolver.
             if (!currentColorPalette.isEmpty()) {
-                nvlViewer.setLeidenClusterColors(currentColorPalette);
+                nvlViewer.applyGraphPalette(currentColorPalette);
             }
             // Push the unified per-node color map so the freshly-
             // created viewer reflects the same colors the previous
@@ -247,8 +250,13 @@ public class SwitchingViewer extends Composite {
             sigmaViewer.setGraphData(data);
         } else if (currentEngine == GraphEngine.NEO4J_NVL && nvlViewer != null) {
             nvlViewer.setGraphData(data);
+            // Belt-and-braces: Neo4jNvlViewer.setGraphData already pushes
+            // the graph-attached palette via bridge.applyGraphPalette(...).
+            // The second push here is idempotent (refreshPalette merges
+            // all three color sources) and protects against any future
+            // refactor that drops the auto-push from setGraphData.
             if (!currentColorPalette.isEmpty()) {
-                nvlViewer.setLeidenClusterColors(currentColorPalette);
+                nvlViewer.applyGraphPalette(currentColorPalette);
             }
         } else if (visViewer != null) {
             visViewer.setGraphData(data);
